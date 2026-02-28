@@ -14,6 +14,17 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Request logging
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    const start = Date.now();
+    res.on("finish", () => {
+      console.log(`[http] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`);
+    });
+  }
+  next();
+});
+
 // SSE endpoint (before API routes to avoid JSON body parsing)
 app.get("/api/events", sseHandler);
 

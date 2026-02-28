@@ -25,6 +25,9 @@ export const HOME_ID = process.env.HOME_ID;
 
 const BASE_URL = REGION_ENDPOINTS[REGION];
 
+console.log(`[tuya] region=${REGION} base=${BASE_URL} device=${DEVICE_ID} home=${HOME_ID}`);
+console.log(`[tuya] ACCESS_ID=${ACCESS_ID ? ACCESS_ID.slice(0, 4) + "***" : "MISSING"}`);
+
 if (!BASE_URL) throw new Error(`Invalid TUYA_REGION "${REGION}". Use: us, eu, cn, in`);
 if (!ACCESS_ID || !ACCESS_SECRET) throw new Error("Missing ACCESS_ID or ACCESS_SECRET in .env");
 if (!DEVICE_ID) throw new Error("Missing DEVICE_ID in .env");
@@ -37,10 +40,12 @@ let tokenExpiry = 0;
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
+  console.log("[tuya] Fetching new access token...");
   const result = await signedRequest("GET", "/v1.0/token?grant_type=1", null, true);
   cachedToken = result.access_token;
   // Tokens expire in 7200s; refresh 60s early
   tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
+  console.log(`[tuya] Token obtained, expires in ${result.expire_time}s`);
   return cachedToken;
 }
 
@@ -98,24 +103,30 @@ async function signedRequest(method, path, body = null, isTokenRequest = false, 
   if (body) options.body = JSON.stringify(body);
 
   const url = `${BASE_URL}${path}`;
+  console.log(`[tuya] ${method} ${path}`);
   let res;
   try {
     res = await fetch(url, options);
   } catch (err) {
-    throw new Error(`Tuya fetch failed for ${url}: ${err.cause ? JSON.stringify(err.cause) : err.message}`);
+    const detail = err.cause ? JSON.stringify(err.cause) : err.message;
+    console.error(`[tuya] FETCH ERROR ${method} ${path}: ${detail}`);
+    throw new Error(`Tuya fetch failed for ${url}: ${detail}`);
   }
   const data = await res.json();
 
   // Retry once on transient 501 errors
   if (!data.success && data.code === 501 && _retry < 1) {
+    console.warn(`[tuya] 501 transient error on ${path}, retrying...`);
     await new Promise((r) => setTimeout(r, 1000));
     return signedRequest(method, path, body, isTokenRequest, _retry + 1);
   }
 
   if (!data.success) {
+    console.error(`[tuya] API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
     throw new Error(`Tuya API error [${data.code}]: ${data.msg || JSON.stringify(data)}`);
   }
 
+  console.log(`[tuya] ${method} ${path} OK`);
   return data.result;
 }
 
