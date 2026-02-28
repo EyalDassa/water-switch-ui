@@ -5,11 +5,16 @@ services:
       - "80:80"
     depends_on:
       - backend
+    networks:
+      - default
+      - nginx-reverse-proxy_default
 
   backend:
     build: ./backend
     expose:
       - "3001"
+    networks:
+      - default
     environment:
       - ACCESS_ID=${ACCESS_ID}
       - ACCESS_SECRET=${ACCESS_SECRET}
