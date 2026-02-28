@@ -10,5 +10,10 @@ services:
     build: ./backend
     expose:
       - "3001"
-    env_file:
-      - ./backend/.env
+    environment:
+      - ACCESS_ID=${ACCESS_ID}
+      - ACCESS_SECRET=${ACCESS_SECRET}
+      - DEVICE_ID=${DEVICE_ID}
+      - TUYA_REGION=${TUYA_REGION}
+      - HOME_ID=${HOME_ID}
+      - PORT=3001
