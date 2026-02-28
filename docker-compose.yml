@@ -15,6 +15,7 @@ services:
       - "3001"
     networks:
       - default
+      - nginx-reverse-proxy_default
     environment:
       - ACCESS_ID=${ACCESS_ID}
       - ACCESS_SECRET=${ACCESS_SECRET}
