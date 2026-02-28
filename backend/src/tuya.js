@@ -97,7 +97,13 @@ async function signedRequest(method, path, body = null, isTokenRequest = false, 
 
   if (body) options.body = JSON.stringify(body);
 
-  const res = await fetch(`${BASE_URL}${path}`, options);
+  const url = `${BASE_URL}${path}`;
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    throw new Error(`Tuya fetch failed for ${url}: ${err.cause ? JSON.stringify(err.cause) : err.message}`);
+  }
   const data = await res.json();
 
   // Retry once on transient 501 errors
