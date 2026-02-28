@@ -17,3 +17,7 @@ services:
       - TUYA_REGION=${TUYA_REGION}
       - HOME_ID=${HOME_ID}
       - PORT=3001
+
+networks:
+  nginx-reverse-proxy_default:
+    external: true
