@@ -1,0 +1,86 @@
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  background: white;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.headerInner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 14px 20px;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.droplet {
+  font-size: 22px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.main {
+  flex: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 20px 16px 40px;
+}
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.leftCol,
+.rightCol {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.schedulesError {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239,68,68,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+/* Desktop: two-column layout */
+@media (min-width: 640px) {
+  .grid {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .leftCol {
+    width: 320px;
+    flex-shrink: 0;
+  }
+
+  .rightCol {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .main {
+    padding: 28px 24px 60px;
+  }
+}

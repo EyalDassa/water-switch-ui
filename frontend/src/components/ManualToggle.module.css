@@ -1,0 +1,85 @@
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 17px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  min-height: 60px;
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.turnOn {
+  background: var(--success);
+  color: white;
+}
+
+.turnOn:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.turnOff {
+  background: #f1f5f9;
+  color: var(--danger);
+  border: 2px solid #fecaca;
+}
+
+.turnOff:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.icon {
+  font-size: 15px;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.error {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239,68,68,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}

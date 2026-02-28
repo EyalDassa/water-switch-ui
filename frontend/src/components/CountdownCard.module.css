@@ -1,0 +1,120 @@
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.active {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.activeIcon {
+  font-size: 16px;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.preset {
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 12px 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: all 0.12s;
+}
+
+.preset:hover:not(:disabled) {
+  background: #e0e7ff;
+  color: var(--primary);
+}
+
+.preset:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.preset:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.customForm {
+  display: flex;
+  gap: 8px;
+}
+
+.input {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
+  color: var(--text);
+  background: white;
+  transition: border-color 0.12s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.goButton {
+  background: var(--primary);
+  color: white;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.12s;
+}
+
+.goButton:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.goButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239,68,68,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}

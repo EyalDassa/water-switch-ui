@@ -1,0 +1,167 @@
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.addButton {
+  background: var(--primary);
+  color: white;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.12s;
+}
+
+.addButton:hover {
+  background: var(--primary-hover);
+}
+
+.empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+}
+
+.disabled {
+  opacity: 0.5;
+}
+
+/* Color dot — matches the clock arc color, acts as enable/disable toggle */
+.toggleButton {
+  background: none;
+  padding: 2px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.colorDot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transition: all 0.15s;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
+.toggleButton:hover .colorDot {
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.12);
+  transform: scale(1.15);
+}
+
+/* Schedule info (clickable for edit) */
+.itemInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.12s;
+}
+
+.itemInfo:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeRange {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.days {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Action buttons */
+.itemActions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.editButton,
+.deleteButton {
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.editButton:hover {
+  background: #e0e7ff;
+  color: var(--primary);
+}
+
+.deleteButton:hover {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.error {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239,68,68,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
