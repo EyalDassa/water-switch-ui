@@ -60,7 +60,6 @@ jobs:
           - service: frontend
             context: ./frontend
             image: ghcr.io/eyaldassa/water-switch-ui-frontend
-            build-args: VITE_CLERK_PUBLISHABLE_KEY=${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,7 +83,7 @@ jobs:
           context: ${{ matrix.context }}
           push: true
           platforms: linux/arm64
-          build-args: ${{ matrix.build-args }}
+          build-args: ${{ matrix.service == 'frontend' && format('VITE_CLERK_PUBLISHABLE_KEY={0}', secrets.VITE_CLERK_PUBLISHABLE_KEY) || '' }}
           tags: |
             ${{ matrix.image }}:${{ needs.version.outputs.version }}
             ${{ matrix.image }}:latest
