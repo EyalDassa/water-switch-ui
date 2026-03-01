@@ -5,11 +5,19 @@ import { formatDays } from "./ScheduleList";
 import { getScheduleColor, getScheduleColorLight } from "../scheduleColors";
 import styles from "./AnalogClock.module.css";
 
+export type RunSource =
+  | "scheduled"
+  | "quick_timer"
+  | "quick_timer_external"
+  | "manual"
+  | "external";
+
 export interface HistoryRun {
   startTime: string;       // "HH:MM"
   endTime: string | null;  // "HH:MM" or null if still running
   date: string;            // "YYYY-MM-DD"
   durationSec: number;
+  source?: RunSource;
 }
 
 interface Props {

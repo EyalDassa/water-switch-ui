@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { notifyStatusChange } from "../events.js";
+import { recordAction, findOurAction } from "../actionTracker.js";
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.post("/toggle", async (req, res) => {
         commands: [{ code: "switch_1", value }],
       });
     }
+    recordAction(deviceId, "toggle", action);
     res.json({ success: true, isOn: value });
     notifyStatusChange(deviceId, req.tuya);
   } catch (firstErr) {
@@ -60,6 +62,7 @@ router.post("/toggle", async (req, res) => {
           commands: [{ code: "switch", value }],
         });
       }
+      recordAction(deviceId, "toggle", action);
       res.json({ success: true, isOn: value });
       notifyStatusChange(deviceId, req.tuya);
     } catch (err) {
@@ -82,39 +85,42 @@ router.get("/history", async (req, res) => {
     if (req.tuya.isSharing) {
       try {
         const data = await req.tuya.getDeviceLogs(deviceId, {
-          start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "switch_1",
+          start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "switch_1,countdown_1",
         });
-        // Process logs same as standard API
         const logs = data?.logs || [];
-        const switchEvents = logs.sort((a, b) => a.event_time - b.event_time);
-        const allRuns = buildRuns(switchEvents, endTime);
+        const switchEvents = logs.filter((l) => l.code === "switch_1" || l.code === "switch").sort((a, b) => a.event_time - b.event_time);
+        const countdownEvents = logs.filter((l) => l.code === "countdown_1" || l.code === "countdown").sort((a, b) => a.event_time - b.event_time);
+        const countdownSetEvents = findCountdownSetEvents(countdownEvents);
+        const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, []);
         const runs = allRuns.slice(-10);
         const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
         return res.json({ runs, totalSeconds });
       } catch {
-        // Sharing API logs endpoint may not exist — return empty
         return res.json({ runs: [], totalSeconds: 0 });
       }
     }
 
-    // Standard Tuya API — paginated logs
+    // Fetch automations to detect schedule-triggered events
+    const scheduleTimes = await getScheduleTimes(req.tuya, req.deviceConfig);
+
+    // Standard Tuya API — paginated logs (fetch both switch and countdown codes)
     const seen = new Set();
-    const switchEvents = [];
+    const allLogs = [];
     let lastRowKey = "";
     const MAX_PAGES = 5;
 
     for (let page = 0; page < MAX_PAGES; page++) {
       const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : "";
       const data = await req.tuya.get(
-        `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=switch_1${rowKeyParam}`
+        `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=switch_1,countdown_1${rowKeyParam}`
       );
 
       const logs = data.logs || [];
       for (const log of logs) {
-        const key = `${log.event_time}_${log.value}`;
+        const key = `${log.event_time}_${log.code}_${log.value}`;
         if (!seen.has(key)) {
           seen.add(key);
-          switchEvents.push(log);
+          allLogs.push(log);
         }
       }
 
@@ -122,8 +128,11 @@ router.get("/history", async (req, res) => {
       lastRowKey = data.next_row_key;
     }
 
-    switchEvents.sort((a, b) => a.event_time - b.event_time);
-    const allRuns = buildRuns(switchEvents, endTime);
+    const switchEvents = allLogs.filter((l) => l.code === "switch_1" || l.code === "switch").sort((a, b) => a.event_time - b.event_time);
+    const countdownEvents = allLogs.filter((l) => l.code === "countdown_1" || l.code === "countdown").sort((a, b) => a.event_time - b.event_time);
+
+    const countdownSetEvents = findCountdownSetEvents(countdownEvents);
+    const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes);
     const runs = allRuns.slice(-10);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
@@ -134,11 +143,95 @@ router.get("/history", async (req, res) => {
   }
 });
 
+// Extract scheduled "HH:MM" times from automations targeting this device.
+// Returns an array of { time: "HH:MM", loops: "1111111" } for matching against events.
+async function getScheduleTimes(tuya, deviceConfig) {
+  if (tuya.isSharing || !deviceConfig?.homeId) return [];
+  try {
+    const automations = await tuya.get(`/v1.0/homes/${deviceConfig.homeId}/automations`);
+    const times = [];
+    for (const a of automations || []) {
+      const targetsDevice = a.actions?.some((act) => act.entity_id === deviceConfig.deviceId);
+      if (!targetsDevice) continue;
+      const cond = a.conditions?.[0]?.display;
+      if (cond?.time && a.enabled) {
+        times.push({ time: cond.time, loops: cond.loops || "0000000" });
+      }
+    }
+    return times;
+  } catch (err) {
+    console.warn("[history] Failed to fetch automations for schedule matching:", err.message);
+    return [];
+  }
+}
+
+// Check if an event timestamp matches any scheduled automation time (±2 min tolerance).
+// Also checks the event falls on a day the schedule is active.
+function matchesSchedule(eventTimestamp, scheduleTimes) {
+  if (scheduleTimes.length === 0) return false;
+  const d = new Date(eventTimestamp);
+  const eventHH = d.getHours();
+  const eventMM = d.getMinutes();
+  const eventMin = eventHH * 60 + eventMM;
+  // JS getDay: 0=Sun, convert to Mon=0..Sun=6 to match Tuya loops
+  const jsDay = d.getDay();
+  const tuyaDay = jsDay === 0 ? 6 : jsDay - 1;
+
+  for (const s of scheduleTimes) {
+    const [sh, sm] = s.time.split(":").map(Number);
+    const schedMin = sh * 60 + sm;
+    if (Math.abs(eventMin - schedMin) <= 2 && s.loops[tuyaDay] === "1") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Filter countdown events to only the "set" moments (value jumped up from previous),
+// ignoring the continuous tick-down reports the device sends as countdown decrements.
+function findCountdownSetEvents(countdownEvents) {
+  const setEvents = [];
+  for (let i = 0; i < countdownEvents.length; i++) {
+    const val = parseInt(countdownEvents[i].value, 10) || 0;
+    const prevVal = i > 0 ? (parseInt(countdownEvents[i - 1].value, 10) || 0) : 0;
+    // Value increased = a new countdown was just set
+    if (val > prevVal) {
+      setEvents.push(countdownEvents[i]);
+    }
+  }
+  return setEvents;
+}
+
 function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function buildRuns(switchEvents, endTime) {
+function fmtHHMM(d) {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Classify a single log event's trigger source.
+// Note: Tuya type-7 logs report event_from="1" for ALL events on this device,
+// so we ignore event_from and rely on our action tracker + countdown detection.
+function classifyEvent(event, deviceId) {
+  const action = (event.value === "true" || event.value === true) ? "on" : "off";
+  const ours = findOurAction(deviceId, event.event_time, action);
+  if (ours) return ours.type; // "toggle" or "countdown"
+  return "external";
+}
+
+// Determine the run's display source from the ON event classification + context
+function determineRunSource(onSource, hasCountdown, isScheduled) {
+  if (onSource === "countdown") return "quick_timer";
+  if (onSource === "toggle") return "manual";
+  // Schedule match takes priority over generic "external"
+  if (isScheduled) return "scheduled";
+  // External (not from our API): use countdown detection to narrow down
+  if (hasCountdown) return "quick_timer_external";
+  return "external";
+}
+
+function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTimes) {
   const allRuns = [];
   let onEvent = null;
 
@@ -148,11 +241,19 @@ function buildRuns(switchEvents, endTime) {
     } else if (onEvent) {
       const startDate = new Date(onEvent.event_time);
       const durationSec = Math.round((event.event_time - onEvent.event_time) / 1000);
+
+      const onSource = classifyEvent(onEvent, deviceId);
+      const hasCountdown = countdownEvents.some(
+        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+      );
+      const isScheduled = onSource === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+
       allRuns.push({
-        startTime: `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`,
-        endTime: `${String(new Date(event.event_time).getHours()).padStart(2, "0")}:${String(new Date(event.event_time).getMinutes()).padStart(2, "0")}`,
+        startTime: fmtHHMM(startDate),
+        endTime: fmtHHMM(new Date(event.event_time)),
         date: fmtDate(startDate),
         durationSec,
+        source: determineRunSource(onSource, hasCountdown, isScheduled),
       });
       onEvent = null;
     }
@@ -161,11 +262,17 @@ function buildRuns(switchEvents, endTime) {
   if (onEvent) {
     const startDate = new Date(onEvent.event_time);
     const durationSec = Math.round((endTime - onEvent.event_time) / 1000);
+    const onSource = classifyEvent(onEvent, deviceId);
+    const hasCountdown = countdownEvents.some(
+      (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+    );
+    const isScheduled = onSource === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
     allRuns.push({
-      startTime: `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`,
+      startTime: fmtHHMM(startDate),
       endTime: null,
       date: fmtDate(startDate),
       durationSec,
+      source: determineRunSource(onSource, hasCountdown, isScheduled),
     });
   }
 

@@ -72,6 +72,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.source {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
 .duration {
   color: var(--text-muted);
   margin-left: auto;

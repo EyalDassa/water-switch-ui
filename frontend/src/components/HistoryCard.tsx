@@ -1,6 +1,14 @@
 import type { HistoryRun } from "./AnalogClock";
 import styles from "./HistoryCard.module.css";
 
+const SOURCE_LABELS: Record<string, { text: string; color: string }> = {
+  scheduled:            { text: "Scheduled",          color: "#8b5cf6" },
+  quick_timer:          { text: "Quick Timer (UI)",   color: "#f97316" },
+  quick_timer_external: { text: "Timer (External)",   color: "#f97316" },
+  manual:               { text: "Manual (UI)",        color: "#3b82f6" },
+  external:             { text: "Manual (External)",  color: "#64748b" },
+};
+
 interface Props {
   runs: HistoryRun[];
   totalSeconds: number;
@@ -68,6 +76,11 @@ export function HistoryCard({ runs }: Props) {
                 <span className={styles.time}>
                   {run.startTime} – {run.endTime ?? "now"}
                 </span>
+                {run.source && SOURCE_LABELS[run.source] && (
+                  <span className={styles.source} style={{ color: SOURCE_LABELS[run.source].color }}>
+                    {SOURCE_LABELS[run.source].text}
+                  </span>
+                )}
                 <span className={styles.duration}>{formatDuration(run.durationSec)}</span>
               </div>
             </div>

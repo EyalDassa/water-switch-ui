@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { notifyStatusChange, notifySchedulesChanged } from "../events.js";
+import { recordAction } from "../actionTracker.js";
 
 const router = Router();
 
@@ -261,6 +262,7 @@ router.post("/countdown", async (req, res) => {
         ],
       });
     }
+    recordAction(deviceId, "countdown", "on");
     res.json({ success: true, countdownSeconds: seconds });
     notifyStatusChange(deviceId, req.tuya);
   } catch (err) {
