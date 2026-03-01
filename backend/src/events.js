@@ -1,29 +1,51 @@
 /**
- * SSE (Server-Sent Events) manager for pushing real-time device updates.
+ * SSE (Server-Sent Events) manager with per-device client groups.
  *
- * - Maintains a set of connected SSE clients
- * - Polls Tuya every 60s to catch scheduled automation state changes
- * - Exports helpers for mutation routes to trigger immediate updates
+ * - Maintains a Map of deviceId → { clients, cachedStatus, pollInterval }
+ * - Only polls devices that have active SSE connections
+ * - Stops polling when all clients for a device disconnect
  */
 
-import { tuya, DEVICE_ID } from "./tuya.js";
+// ── Per-device client registry ──────────────────────────────────────────────
+// Map<deviceId, { clients: Set<res>, tuyaClient: TuyaClient, cachedStatus, pollInterval }>
+const deviceGroups = new Map();
 
-// ── Connected SSE clients ───────────────────────────────────────────────────
-const clients = new Set();
+function getOrCreateGroup(deviceId, tuyaClient) {
+  if (!deviceGroups.has(deviceId)) {
+    deviceGroups.set(deviceId, {
+      clients: new Set(),
+      tuyaClient,
+      cachedStatus: { isOn: false, countdownSeconds: 0 },
+      pollInterval: null,
+    });
+  }
+  const group = deviceGroups.get(deviceId);
+  // Update tuyaClient if a newer one is provided
+  if (tuyaClient) group.tuyaClient = tuyaClient;
+  return group;
+}
 
-function broadcast(event, data) {
+function broadcastToDevice(deviceId, event, data) {
+  const group = deviceGroups.get(deviceId);
+  if (!group) return;
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) {
+  for (const res of group.clients) {
     res.write(msg);
   }
 }
 
-// ── Cached device status ────────────────────────────────────────────────────
-let cachedStatus = { isOn: false, countdownSeconds: 0 };
+async function pollDeviceStatus(deviceId) {
+  const group = deviceGroups.get(deviceId);
+  if (!group || group.clients.size === 0) return;
 
-async function pollStatus() {
   try {
-    const dps = await tuya.get(`/v1.0/iot-03/devices/${DEVICE_ID}/status`);
+    let dps;
+    if (group.tuyaClient.isSharing) {
+      const result = await group.tuyaClient.getDeviceStatus(deviceId);
+      dps = Array.isArray(result) ? result : result?.status || result?.dpStatusRelationDTOS || [];
+    } else {
+      dps = await group.tuyaClient.get(`/v1.0/iot-03/devices/${deviceId}/status`);
+    }
 
     const switchDp = dps.find((dp) => dp.code === "switch_1") ?? dps.find((dp) => dp.code === "switch");
     const countdownDp = dps.find((dp) => dp.code === "countdown_1") ?? dps.find((dp) => dp.code === "countdown");
@@ -34,56 +56,89 @@ async function pollStatus() {
     };
 
     const changed =
-      newStatus.isOn !== cachedStatus.isOn ||
-      newStatus.countdownSeconds !== cachedStatus.countdownSeconds;
+      newStatus.isOn !== group.cachedStatus.isOn ||
+      newStatus.countdownSeconds !== group.cachedStatus.countdownSeconds;
 
-    cachedStatus = newStatus;
+    group.cachedStatus = newStatus;
 
     if (changed) {
-      broadcast("status", cachedStatus);
+      broadcastToDevice(deviceId, "status", newStatus);
     }
   } catch (err) {
-    console.error("SSE pollStatus:", err.message);
+    console.error(`[sse] pollStatus(${deviceId}):`, err.message);
+  }
+}
+
+function startPollingDevice(deviceId) {
+  const group = deviceGroups.get(deviceId);
+  if (!group || group.pollInterval) return;
+
+  pollDeviceStatus(deviceId);
+  group.pollInterval = setInterval(() => pollDeviceStatus(deviceId), 60_000);
+  console.log(`[sse] Started polling device ${deviceId.slice(0, 8)}...`);
+}
+
+function stopPollingDevice(deviceId) {
+  const group = deviceGroups.get(deviceId);
+  if (!group) return;
+
+  if (group.pollInterval) {
+    clearInterval(group.pollInterval);
+    group.pollInterval = null;
+    console.log(`[sse] Stopped polling device ${deviceId.slice(0, 8)}...`);
+  }
+
+  if (group.clients.size === 0) {
+    deviceGroups.delete(deviceId);
   }
 }
 
 // ── Public helpers for mutation routes ───────────────────────────────────────
 
-/** Call after toggle/countdown commands — waits briefly for Tuya to process, then polls + broadcasts */
-export async function notifyStatusChange() {
+/** Call after toggle/countdown — waits briefly for Tuya to process, then polls + broadcasts */
+export async function notifyStatusChange(deviceId, tuyaClient) {
+  if (tuyaClient) getOrCreateGroup(deviceId, tuyaClient);
   await new Promise((r) => setTimeout(r, 1000));
-  await pollStatus();
+  await pollDeviceStatus(deviceId);
 }
 
-/** Call after schedule CRUD — tells all connected frontends to re-fetch schedules */
-export function notifySchedulesChanged() {
-  broadcast("schedules-changed", {});
+/** Call after schedule CRUD — tells connected frontends for this device to re-fetch */
+export function notifySchedulesChanged(deviceId) {
+  broadcastToDevice(deviceId, "schedules-changed", {});
 }
 
 // ── SSE endpoint handler ────────────────────────────────────────────────────
 
 export function sseHandler(req, res) {
+  const deviceId = req.deviceConfig?.deviceId;
+  if (!deviceId) {
+    return res.status(412).json({ error: "no_device" });
+  }
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
 
-  // Send current cached status immediately
-  res.write(`event: status\ndata: ${JSON.stringify(cachedStatus)}\n\n`);
+  const group = getOrCreateGroup(deviceId, req.tuya);
 
-  clients.add(res);
+  // Send cached status immediately
+  res.write(`event: status\ndata: ${JSON.stringify(group.cachedStatus)}\n\n`);
+
+  group.clients.add(res);
+  startPollingDevice(deviceId);
 
   req.on("close", () => {
-    clients.delete(res);
+    group.clients.delete(res);
+    if (group.clients.size === 0) {
+      stopPollingDevice(deviceId);
+    }
   });
 }
 
-// ── Background poll (catches scheduled automation changes) ──────────────────
+// ── Background poll (no-op in per-device mode) ──────────────────────────────
 
 export function startBackgroundPoll() {
-  // Initial poll to populate cache
-  pollStatus();
-  // Then every 60s
-  setInterval(pollStatus, 60_000);
+  console.log("[sse] Per-device polling mode active. Polling starts on SSE connect.");
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, UserButton, useUser } from "@clerk/clerk-react";
 import { useDeviceStatus } from "./hooks/useDeviceStatus";
 import { AnalogClock } from "./components/AnalogClock";
 import type { HistoryRun } from "./components/AnalogClock";
@@ -11,6 +11,7 @@ import { ScheduleList } from "./components/ScheduleList";
 import { ScheduleEditor } from "./components/ScheduleEditor";
 import type { ScheduleEditData } from "./components/ScheduleEditor";
 import { HistoryCard } from "./components/HistoryCard";
+import { DeviceSetup } from "./components/DeviceSetup";
 import styles from "./App.module.css";
 
 export default function App() {
@@ -35,10 +36,35 @@ export default function App() {
       </SignedOut>
 
       <SignedIn>
-        <Dashboard />
+        <AuthenticatedApp />
       </SignedIn>
     </div>
   );
+}
+
+function AuthenticatedApp() {
+  const { user } = useUser();
+  const [deviceConfigured, setDeviceConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const meta = user?.publicMetadata as { configured?: boolean } | undefined;
+    setDeviceConfigured(!!meta?.configured);
+  }, [user]);
+
+  if (deviceConfigured === null) return null; // loading
+
+  if (!deviceConfigured) {
+    return (
+      <DeviceSetup
+        onComplete={() => {
+          // Reload to pick up new session claims with updated metadata
+          window.location.reload();
+        }}
+      />
+    );
+  }
+
+  return <Dashboard />;
 }
 
 function Dashboard() {

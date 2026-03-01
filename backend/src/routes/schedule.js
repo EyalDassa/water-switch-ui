@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { tuya, DEVICE_ID, HOME_ID } from "../tuya.js";
 import { notifyStatusChange, notifySchedulesChanged } from "../events.js";
 
 const router = Router();
@@ -40,7 +39,7 @@ function diffMinutes(start, end) {
 }
 
 // ── Parse a Tuya automation into our schedule shape ──────────────────────────
-function parseAutomation(a) {
+function parseAutomation(a, deviceId) {
   const cond = a.conditions?.[0]?.display;
   if (!cond) return null;
 
@@ -65,14 +64,21 @@ function parseAutomation(a) {
 
 // GET /api/schedules
 router.get("/schedules", async (req, res) => {
+  const { deviceId, homeId } = req.deviceConfig;
+
+  // Sharing API doesn't support automation CRUD — return empty for now
+  if (req.tuya.isSharing) {
+    return res.json({ schedules: [] });
+  }
+
   try {
-    const automations = await tuya.get(`/v1.0/homes/${HOME_ID}/automations`);
+    const automations = await req.tuya.get(`/v1.0/homes/${homeId}/automations`);
     // Only include automations that target our device
     const ours = automations
       .filter((a) =>
-        a.actions?.some((act) => act.entity_id === DEVICE_ID)
+        a.actions?.some((act) => act.entity_id === deviceId)
       )
-      .map(parseAutomation)
+      .map((a) => parseAutomation(a, deviceId))
       .filter(Boolean);
 
     // Return in the on/off pair format the frontend expects
@@ -89,6 +95,10 @@ router.get("/schedules", async (req, res) => {
 
 // POST /api/schedules  { name?, startTime, endTime, days }
 router.post("/schedules", async (req, res) => {
+  if (req.tuya.isSharing) {
+    return res.status(501).json({ error: "Schedule creation not yet supported for shared devices" });
+  }
+  const { deviceId, homeId } = req.deviceConfig;
   const { name, startTime, endTime, days = ["daily"] } = req.body;
   if (!startTime || !endTime) {
     return res.status(400).json({ error: "startTime and endTime required (HH:MM)" });
@@ -100,7 +110,7 @@ router.post("/schedules", async (req, res) => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
   try {
-    const automationId = await tuya.post(`/v1.0/homes/${HOME_ID}/automations`, {
+    const automationId = await req.tuya.post(`/v1.0/homes/${homeId}/automations`, {
       name: name || `Water ${startTime} (${durationMin}m)`,
       background: AUTOMATION_BG,
       conditions: [{
@@ -115,15 +125,15 @@ router.post("/schedules", async (req, res) => {
         order_num: 1,
       }],
       actions: [
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { switch_1: true } },
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { countdown_1: countdownSec } },
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { relay_status: "power_off" } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { switch_1: true } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { countdown_1: countdownSec } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { relay_status: "power_off" } },
       ],
       match_type: 1,
       preconditions: [],
     });
     res.json({ success: true, id: automationId });
-    notifySchedulesChanged();
+    notifySchedulesChanged(deviceId);
   } catch (err) {
     console.error("POST /schedules:", err.message);
     res.status(502).json({ error: err.message });
@@ -132,6 +142,10 @@ router.post("/schedules", async (req, res) => {
 
 // PUT /api/schedules/:id  { name, startTime, endTime, days }
 router.put("/schedules/:id", async (req, res) => {
+  if (req.tuya.isSharing) {
+    return res.status(501).json({ error: "Schedule editing not yet supported for shared devices" });
+  }
+  const { deviceId, homeId } = req.deviceConfig;
   const autoId = req.params.id.replace(/:on$|:off$/, "");
   const { name, startTime, endTime, days = ["daily"] } = req.body;
   if (!startTime || !endTime) {
@@ -144,7 +158,7 @@ router.put("/schedules/:id", async (req, res) => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
   try {
-    await tuya.put(`/v1.0/homes/${HOME_ID}/automations/${autoId}`, {
+    await req.tuya.put(`/v1.0/homes/${homeId}/automations/${autoId}`, {
       name: name || `Water ${startTime} (${durationMin}m)`,
       background: AUTOMATION_BG,
       conditions: [{
@@ -159,15 +173,15 @@ router.put("/schedules/:id", async (req, res) => {
         order_num: 1,
       }],
       actions: [
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { switch_1: true } },
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { countdown_1: countdownSec } },
-        { action_executor: "dpIssue", entity_id: DEVICE_ID, executor_property: { relay_status: "power_off" } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { switch_1: true } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { countdown_1: countdownSec } },
+        { action_executor: "dpIssue", entity_id: deviceId, executor_property: { relay_status: "power_off" } },
       ],
       match_type: 1,
       preconditions: [],
     });
     res.json({ success: true });
-    notifySchedulesChanged();
+    notifySchedulesChanged(deviceId);
   } catch (err) {
     console.error("PUT /schedules:", err.message);
     res.status(502).json({ error: err.message });
@@ -176,11 +190,15 @@ router.put("/schedules/:id", async (req, res) => {
 
 // DELETE /api/schedules/:id
 router.delete("/schedules/:id", async (req, res) => {
+  if (req.tuya.isSharing) {
+    return res.status(501).json({ error: "Schedule deletion not yet supported for shared devices" });
+  }
+  const { homeId, deviceId } = req.deviceConfig;
   const autoId = req.params.id.replace(/:on$|:off$/, "");
   try {
-    await tuya.delete(`/v1.0/homes/${HOME_ID}/automations/${autoId}`);
+    await req.tuya.delete(`/v1.0/homes/${homeId}/automations/${autoId}`);
     res.json({ success: true });
-    notifySchedulesChanged();
+    notifySchedulesChanged(deviceId);
   } catch (err) {
     console.error("DELETE /schedules:", err.message);
     res.status(502).json({ error: err.message });
@@ -189,11 +207,15 @@ router.delete("/schedules/:id", async (req, res) => {
 
 // PUT /api/schedules/:id/enable
 router.put("/schedules/:id/enable", async (req, res) => {
+  if (req.tuya.isSharing) {
+    return res.status(501).json({ error: "Not supported for shared devices" });
+  }
+  const { homeId, deviceId } = req.deviceConfig;
   const autoId = req.params.id.replace(/:on$|:off$/, "");
   try {
-    await tuya.put(`/v1.0/homes/${HOME_ID}/automations/${autoId}/actions/enable`);
+    await req.tuya.put(`/v1.0/homes/${homeId}/automations/${autoId}/actions/enable`);
     res.json({ success: true });
-    notifySchedulesChanged();
+    notifySchedulesChanged(deviceId);
   } catch (err) {
     console.error("PUT /schedules enable:", err.message);
     res.status(502).json({ error: err.message });
@@ -202,11 +224,15 @@ router.put("/schedules/:id/enable", async (req, res) => {
 
 // PUT /api/schedules/:id/disable
 router.put("/schedules/:id/disable", async (req, res) => {
+  if (req.tuya.isSharing) {
+    return res.status(501).json({ error: "Not supported for shared devices" });
+  }
+  const { homeId, deviceId } = req.deviceConfig;
   const autoId = req.params.id.replace(/:on$|:off$/, "");
   try {
-    await tuya.put(`/v1.0/homes/${HOME_ID}/automations/${autoId}/actions/disable`);
+    await req.tuya.put(`/v1.0/homes/${homeId}/automations/${autoId}/actions/disable`);
     res.json({ success: true });
-    notifySchedulesChanged();
+    notifySchedulesChanged(deviceId);
   } catch (err) {
     console.error("PUT /schedules disable:", err.message);
     res.status(502).json({ error: err.message });
@@ -215,20 +241,28 @@ router.put("/schedules/:id/disable", async (req, res) => {
 
 // POST /api/countdown  { minutes }
 router.post("/countdown", async (req, res) => {
+  const { deviceId } = req.deviceConfig;
   const { minutes } = req.body;
   if (!minutes || minutes < 1 || minutes > 1440) {
     return res.status(400).json({ error: "minutes must be 1-1440" });
   }
   const seconds = Math.round(minutes * 60);
   try {
-    await tuya.post(`/v1.0/iot-03/devices/${DEVICE_ID}/commands`, {
-      commands: [
+    if (req.tuya.isSharing) {
+      await req.tuya.sendCommands(deviceId, [
         { code: "switch_1", value: true },
         { code: "countdown_1", value: seconds },
-      ],
-    });
+      ]);
+    } else {
+      await req.tuya.post(`/v1.0/iot-03/devices/${deviceId}/commands`, {
+        commands: [
+          { code: "switch_1", value: true },
+          { code: "countdown_1", value: seconds },
+        ],
+      });
+    }
     res.json({ success: true, countdownSeconds: seconds });
-    notifyStatusChange();
+    notifyStatusChange(deviceId, req.tuya);
   } catch (err) {
     console.error("POST /countdown:", err.message);
     res.status(502).json({ error: err.message });

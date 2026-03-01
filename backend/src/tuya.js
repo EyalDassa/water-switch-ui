@@ -1,7 +1,10 @@
 /**
- * Lightweight Tuya Cloud API client using Node.js built-ins only.
- * Implements HMAC-SHA256 request signing per Tuya's authentication spec:
- * https://developer.tuya.com/en/docs/iot/authentication-method
+ * Tuya Cloud API client using Node.js built-ins only.
+ * Implements HMAC-SHA256 request signing per Tuya's authentication spec.
+ *
+ * Supports two modes:
+ * - Simple mode (global): ACCESS_ID + ACCESS_SECRET → automatic token via grant_type=1
+ * - User mode (per-user): ACCESS_ID + ACCESS_SECRET + user's token/refreshToken from QR login
  *
  * Node.js 18+ is required for the built-in `fetch` and `crypto` modules.
  */
@@ -16,124 +19,159 @@ const REGION_ENDPOINTS = {
   in: "https://openapi.tuyain.com",
 };
 
+export class TuyaClient {
+  #accessId;
+  #accessSecret;
+  #baseUrl;
+  #region;
+  #cachedToken = null;
+  #tokenExpiry = 0;
+  #refreshToken = null;
+  #onTokenRefresh = null;
+
+  /**
+   * @param {object} opts
+   * @param {string} opts.accessId - Tuya project client ID
+   * @param {string} opts.accessSecret - Tuya project client secret
+   * @param {string} opts.region - Region code (us, eu, cn, in)
+   * @param {string} [opts.baseUrl] - Override base URL (e.g. for QR API at apigw.iotbing.com)
+   * @param {string} [opts.token] - Pre-obtained access token (user mode)
+   * @param {string} [opts.refreshToken] - Refresh token (user mode)
+   * @param {function} [opts.onTokenRefresh] - Called with (newToken, newRefreshToken) on refresh
+   */
+  constructor({ accessId, accessSecret, region, baseUrl, token, refreshToken, onTokenRefresh }) {
+    this.#accessId = accessId;
+    this.#accessSecret = accessSecret;
+    this.#region = region;
+    this.#baseUrl = baseUrl || REGION_ENDPOINTS[region];
+    if (!this.#baseUrl) throw new Error(`Invalid region "${region}". Use: us, eu, cn, in`);
+    if (token) {
+      this.#cachedToken = token;
+      this.#tokenExpiry = Date.now() + 7000 * 1000; // ~2hr assumed
+    }
+    this.#refreshToken = refreshToken || null;
+    this.#onTokenRefresh = onTokenRefresh || null;
+  }
+
+  get region() { return this.#region; }
+  get isSharing() { return false; }
+
+  async #getToken() {
+    if (this.#cachedToken && Date.now() < this.#tokenExpiry) return this.#cachedToken;
+
+    if (this.#refreshToken) {
+      // User mode: refresh using refresh_token
+      console.log("[tuya] Refreshing user token...");
+      const result = await this.#signedRequest("GET", `/v1.0/token/${this.#refreshToken}`, null, true);
+      this.#cachedToken = result.access_token;
+      this.#refreshToken = result.refresh_token;
+      this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
+      this.#onTokenRefresh?.(result.access_token, result.refresh_token);
+      console.log(`[tuya] User token refreshed, expires in ${result.expire_time}s`);
+      return this.#cachedToken;
+    }
+
+    // Simple mode: fetch new project token
+    console.log("[tuya] Fetching new access token...");
+    const result = await this.#signedRequest("GET", "/v1.0/token?grant_type=1", null, true);
+    this.#cachedToken = result.access_token;
+    this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
+    console.log(`[tuya] Token obtained, expires in ${result.expire_time}s`);
+    return this.#cachedToken;
+  }
+
+  #sign(str, secret) {
+    return createHmac("sha256", secret).update(str).digest("hex").toUpperCase();
+  }
+
+  async #signedRequest(method, path, body = null, isTokenRequest = false, _retry = 0) {
+    const timestamp = String(Date.now());
+    const nonce = Math.random().toString(36).slice(2);
+    const token = isTokenRequest ? "" : await this.#getToken();
+
+    const bodyHash = body
+      ? createHash("sha256").update(JSON.stringify(body)).digest("hex")
+      : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    let signUrl = path;
+    const qIdx = path.indexOf("?");
+    if (qIdx !== -1) {
+      const basePath = path.slice(0, qIdx);
+      const qs = path.slice(qIdx + 1);
+      const sorted = qs.split("&").sort().join("&");
+      signUrl = basePath + "?" + sorted;
+    }
+
+    const stringToSign = [method, bodyHash, "", signUrl].join("\n");
+    const signStr = this.#accessId + token + timestamp + nonce + stringToSign;
+    const signature = this.#sign(signStr, this.#accessSecret);
+
+    const headers = {
+      client_id: this.#accessId,
+      access_token: token,
+      sign: signature,
+      t: timestamp,
+      nonce,
+      sign_method: "HMAC-SHA256",
+      "Content-Type": "application/json",
+    };
+
+    const options = { method, headers };
+    if (body) options.body = JSON.stringify(body);
+
+    const url = `${this.#baseUrl}${path}`;
+    console.log(`[tuya] ${method} ${path}`);
+
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (err) {
+      const detail = err.cause ? JSON.stringify(err.cause) : err.message;
+      console.error(`[tuya] FETCH ERROR ${method} ${path}: ${detail}`);
+      throw new Error(`Tuya fetch failed for ${url}: ${detail}`);
+    }
+    const data = await res.json();
+
+    if (!data.success && data.code === 501 && _retry < 1) {
+      console.warn(`[tuya] 501 transient error on ${path}, retrying...`);
+      await new Promise((r) => setTimeout(r, 1000));
+      return this.#signedRequest(method, path, body, isTokenRequest, _retry + 1);
+    }
+
+    if (!data.success) {
+      console.error(`[tuya] API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
+      throw new Error(`Tuya API error [${data.code}]: ${data.msg || JSON.stringify(data)}`);
+    }
+
+    console.log(`[tuya] ${method} ${path} OK`);
+    return data.result;
+  }
+
+  get(path) { return this.#signedRequest("GET", path); }
+  post(path, body) { return this.#signedRequest("POST", path, body); }
+  put(path, body) { return this.#signedRequest("PUT", path, body); }
+  delete(path) { return this.#signedRequest("DELETE", path); }
+}
+
+// ── Default global client from .env ──────────────────────────────────────────
+
 const ACCESS_ID = process.env.ACCESS_ID;
 const ACCESS_SECRET = process.env.ACCESS_SECRET;
 const REGION = process.env.TUYA_REGION || "eu";
 
-export const DEVICE_ID = process.env.DEVICE_ID;
-export const HOME_ID = process.env.HOME_ID;
+export const DEFAULT_DEVICE_ID = process.env.DEVICE_ID || null;
+export const DEFAULT_HOME_ID = process.env.HOME_ID || null;
 
-const BASE_URL = REGION_ENDPOINTS[REGION];
-
-console.log(`[tuya] region=${REGION} base=${BASE_URL} device=${DEVICE_ID} home=${HOME_ID}`);
-console.log(`[tuya] ACCESS_ID=${ACCESS_ID ? ACCESS_ID.slice(0, 4) + "***" : "MISSING"}`);
-
-if (!BASE_URL) throw new Error(`Invalid TUYA_REGION "${REGION}". Use: us, eu, cn, in`);
 if (!ACCESS_ID || !ACCESS_SECRET) throw new Error("Missing ACCESS_ID or ACCESS_SECRET in .env");
-if (!DEVICE_ID) throw new Error("Missing DEVICE_ID in .env");
-if (!HOME_ID) throw new Error("Missing HOME_ID in .env");
+if (!DEFAULT_DEVICE_ID) console.warn("[tuya] No default DEVICE_ID in .env (per-user binding mode)");
+if (!DEFAULT_HOME_ID) console.warn("[tuya] No default HOME_ID in .env (per-user binding mode)");
 
-// ── Token cache ────────────────────────────────────────────────────────────────
-let cachedToken = null;
-let tokenExpiry = 0;
+export const defaultClient = new TuyaClient({ accessId: ACCESS_ID, accessSecret: ACCESS_SECRET, region: REGION });
 
-async function getToken() {
-  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+console.log(`[tuya] region=${REGION} base=${REGION_ENDPOINTS[REGION]} device=${DEFAULT_DEVICE_ID || "none"} home=${DEFAULT_HOME_ID || "none"}`);
+console.log(`[tuya] ACCESS_ID=${ACCESS_ID.slice(0, 4)}***`);
 
-  console.log("[tuya] Fetching new access token...");
-  const result = await signedRequest("GET", "/v1.0/token?grant_type=1", null, true);
-  cachedToken = result.access_token;
-  // Tokens expire in 7200s; refresh 60s early
-  tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
-  console.log(`[tuya] Token obtained, expires in ${result.expire_time}s`);
-  return cachedToken;
-}
-
-// ── HMAC-SHA256 signing ────────────────────────────────────────────────────────
-function sign(str, secret) {
-  return createHmac("sha256", secret).update(str).digest("hex").toUpperCase();
-}
-
-async function signedRequest(method, path, body = null, isTokenRequest = false, _retry = 0) {
-  const timestamp = String(Date.now());
-  const nonce = Math.random().toString(36).slice(2);
-
-  const token = isTokenRequest ? "" : await getToken();
-
-  // Build string-to-sign per Tuya docs
-  const bodyHash = body
-    ? createHash("sha256").update(JSON.stringify(body)).digest("hex")
-    : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // SHA256("")
-
-  // Separate path and query params — Tuya signing requires sorted query string
-  let signUrl = path;
-  const qIdx = path.indexOf("?");
-  if (qIdx !== -1) {
-    const basePath = path.slice(0, qIdx);
-    const qs = path.slice(qIdx + 1);
-    const sorted = qs.split("&").sort().join("&");
-    signUrl = basePath + "?" + sorted;
-  }
-
-  const stringToSign = [
-    method,
-    bodyHash,
-    "",          // content-MD5 (unused)
-    signUrl,
-  ].join("\n");
-
-  const signStr = ACCESS_ID + token + timestamp + nonce + stringToSign;
-  const signature = sign(signStr, ACCESS_SECRET);
-
-  const headers = {
-    "client_id": ACCESS_ID,
-    "access_token": token,
-    "sign": signature,
-    "t": timestamp,
-    "nonce": nonce,
-    "sign_method": "HMAC-SHA256",
-    "Content-Type": "application/json",
-  };
-
-  const options = {
-    method,
-    headers,
-  };
-
-  if (body) options.body = JSON.stringify(body);
-
-  const url = `${BASE_URL}${path}`;
-  console.log(`[tuya] ${method} ${path}`);
-  let res;
-  try {
-    res = await fetch(url, options);
-  } catch (err) {
-    const detail = err.cause ? JSON.stringify(err.cause) : err.message;
-    console.error(`[tuya] FETCH ERROR ${method} ${path}: ${detail}`);
-    throw new Error(`Tuya fetch failed for ${url}: ${detail}`);
-  }
-  const data = await res.json();
-
-  // Retry once on transient 501 errors
-  if (!data.success && data.code === 501 && _retry < 1) {
-    console.warn(`[tuya] 501 transient error on ${path}, retrying...`);
-    await new Promise((r) => setTimeout(r, 1000));
-    return signedRequest(method, path, body, isTokenRequest, _retry + 1);
-  }
-
-  if (!data.success) {
-    console.error(`[tuya] API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
-    throw new Error(`Tuya API error [${data.code}]: ${data.msg || JSON.stringify(data)}`);
-  }
-
-  console.log(`[tuya] ${method} ${path} OK`);
-  return data.result;
-}
-
-// ── Public API ─────────────────────────────────────────────────────────────────
-export const tuya = {
-  get: (path) => signedRequest("GET", path),
-  post: (path, body) => signedRequest("POST", path, body),
-  put: (path, body) => signedRequest("PUT", path, body),
-  delete: (path) => signedRequest("DELETE", path),
-};
+// Re-export for backward compat during migration
+export const tuya = defaultClient;
+export const DEVICE_ID = DEFAULT_DEVICE_ID;
+export const HOME_ID = DEFAULT_HOME_ID;

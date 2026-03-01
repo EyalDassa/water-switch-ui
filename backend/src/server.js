@@ -4,6 +4,8 @@ import cors from "cors";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { clerkMiddleware, getAuth } from "@clerk/express";
+import { extractDeviceConfig, requireDevice } from "./middleware/deviceConfig.js";
+import setupRoutes from "./routes/setup.js";
 import deviceRoutes from "./routes/device.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { sseHandler, startBackgroundPoll } from "./events.js";
@@ -43,12 +45,15 @@ function requireApiAuth(req, res, next) {
   next();
 }
 
-// SSE endpoint (before API routes to avoid JSON body parsing)
-app.get("/api/events", requireApiAuth, sseHandler);
+// Setup routes — no device required (this IS the device setup)
+app.use("/api", requireApiAuth, setupRoutes);
 
-// API routes (all protected)
-app.use("/api", requireApiAuth, deviceRoutes);
-app.use("/api", requireApiAuth, scheduleRoutes);
+// SSE endpoint — requires configured device
+app.get("/api/events", requireApiAuth, extractDeviceConfig, sseHandler);
+
+// API routes — require configured device
+app.use("/api", requireApiAuth, extractDeviceConfig, requireDevice, deviceRoutes);
+app.use("/api", requireApiAuth, extractDeviceConfig, requireDevice, scheduleRoutes);
 
 // Serve the built React frontend in production
 const frontendDist = join(__dirname, "../../frontend/dist");

@@ -1,0 +1,283 @@
+.container {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 16px;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 32px 28px;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.heading {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: -12px;
+}
+
+/* Step indicator */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.stepDot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+
+.stepDot.active {
+  background: var(--primary);
+  color: white;
+}
+
+.stepDot.done {
+  background: var(--success);
+  color: white;
+}
+
+.stepLine {
+  flex: 1;
+  max-width: 48px;
+  height: 2px;
+  background: var(--border);
+}
+
+/* Step content */
+.stepContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Instructions box */
+.instructions {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.instructionLabel {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.instructionList {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+/* Input */
+.input {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: var(--text);
+  background: white;
+  transition: border-color 0.12s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.input:disabled {
+  opacity: 0.5;
+}
+
+/* Buttons */
+.primaryButton {
+  background: var(--primary);
+  color: white;
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.12s;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.primaryButton:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.primaryButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  background: none;
+  color: var(--text-muted);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.12s;
+}
+
+.secondaryButton:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+/* QR code */
+.qrContainer {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.qrImage {
+  width: 200px;
+  height: 200px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+/* Polling indicator (inline bar below QR) */
+.pollingBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.spinnerSmall {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Device picker */
+.deviceGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deviceCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-align: left;
+  transition: all 0.12s;
+  cursor: pointer;
+}
+
+.deviceCard:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+
+.deviceCard:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.deviceCard:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.deviceName {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.deviceMeta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.deviceStatus {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.deviceStatus.online {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--success);
+}
+
+.deviceStatus.offline {
+  background: rgba(113, 128, 150, 0.1);
+  color: var(--text-muted);
+}
+
+.noDevices {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* Error */
+.error {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
