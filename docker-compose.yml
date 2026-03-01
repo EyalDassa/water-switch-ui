@@ -1,6 +1,6 @@
 services:
   frontend:
-    build: ./frontend
+    image: ghcr.io/eyaldassa/water-switch-ui-frontend:latest
     expose:
       - "80"
     depends_on:
@@ -10,7 +10,7 @@ services:
       - nginx-reverse-proxy_default
 
   backend:
-    build: ./backend
+    image: ghcr.io/eyaldassa/water-switch-ui-backend:latest
     expose:
       - "3001"
     networks:
@@ -22,6 +22,8 @@ services:
       - DEVICE_ID=${DEVICE_ID}
       - TUYA_REGION=${TUYA_REGION}
       - HOME_ID=${HOME_ID}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+      - CLERK_PUBLISHABLE_KEY=${CLERK_PUBLISHABLE_KEY}
       - PORT=3001
       - TZ=Asia/Jerusalem
     volumes:

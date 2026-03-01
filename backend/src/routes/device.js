@@ -53,17 +53,17 @@ router.post("/toggle", async (req, res) => {
   }
 });
 
-// GET /api/history — today's ON/OFF run sessions from Tuya device logs
-// Paginates through all logs for today (countdown_1 events every 30s can fill pages)
+// GET /api/history — 10 most recent ON/OFF run sessions from Tuya device logs
+// Looks back up to 7 days to find enough runs.
 router.get("/history", async (req, res) => {
   try {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startTime = startOfDay.getTime();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startTime = sevenDaysAgo.getTime();
     const endTime = now.getTime();
 
-    // Fetch switch_1 events for today, paginating through countdown noise.
-    // Tuya duplicates events across pages, so we deduplicate by event_time+value.
+    // Fetch only switch_1 events using codes filter — avoids countdown_1 noise
+    // that otherwise fills every page. Tuya duplicates across pages, so deduplicate.
     const seen = new Set();
     const switchEvents = [];
     let lastRowKey = "";
@@ -72,17 +72,15 @@ router.get("/history", async (req, res) => {
     for (let page = 0; page < MAX_PAGES; page++) {
       const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : "";
       const data = await tuya.get(
-        `/v1.0/devices/${DEVICE_ID}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7${rowKeyParam}`
+        `/v1.0/devices/${DEVICE_ID}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=switch_1${rowKeyParam}`
       );
 
       const logs = data.logs || [];
       for (const log of logs) {
-        if (log.code === "switch_1") {
-          const key = `${log.event_time}_${log.value}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            switchEvents.push(log);
-          }
+        const key = `${log.event_time}_${log.value}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          switchEvents.push(log);
         }
       }
 
@@ -93,8 +91,12 @@ router.get("/history", async (req, res) => {
     // Sort chronologically
     switchEvents.sort((a, b) => a.event_time - b.event_time);
 
+    function fmtDate(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+
     // Pair ON→OFF into run sessions
-    const runs = [];
+    const allRuns = [];
     let onEvent = null;
 
     for (const event of switchEvents) {
@@ -102,11 +104,11 @@ router.get("/history", async (req, res) => {
         onEvent = event;
       } else if (onEvent) {
         const startDate = new Date(onEvent.event_time);
-        const endDate = new Date(event.event_time);
         const durationSec = Math.round((event.event_time - onEvent.event_time) / 1000);
-        runs.push({
+        allRuns.push({
           startTime: `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`,
-          endTime: `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`,
+          endTime: `${String(new Date(event.event_time).getHours()).padStart(2, "0")}:${String(new Date(event.event_time).getMinutes()).padStart(2, "0")}`,
+          date: fmtDate(startDate),
           durationSec,
         });
         onEvent = null;
@@ -117,13 +119,16 @@ router.get("/history", async (req, res) => {
     if (onEvent) {
       const startDate = new Date(onEvent.event_time);
       const durationSec = Math.round((endTime - onEvent.event_time) / 1000);
-      runs.push({
+      allRuns.push({
         startTime: `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`,
-        endTime: null, // still running
+        endTime: null,
+        date: fmtDate(startDate),
         durationSec,
       });
     }
 
+    // Return the 10 most recent runs
+    const runs = allRuns.slice(-10);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
     res.json({ runs, totalSeconds });

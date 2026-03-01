@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
 import { useDeviceStatus } from "./hooks/useDeviceStatus";
 import { AnalogClock } from "./components/AnalogClock";
 import type { HistoryRun } from "./components/AnalogClock";
@@ -13,6 +14,34 @@ import { HistoryCard } from "./components/HistoryCard";
 import styles from "./App.module.css";
 
 export default function App() {
+  return (
+    <div className={styles.app}>
+      <header className={styles.header}>
+        <div className={styles.headerInner}>
+          <div className={styles.titleGroup}>
+            <span className={styles.droplet}>💧</span>
+            <h1 className={styles.title}>Water Boiler</h1>
+          </div>
+          <SignedIn>
+            <UserButton />
+          </SignedIn>
+        </div>
+      </header>
+
+      <SignedOut>
+        <main className={styles.signInContainer}>
+          <SignIn routing="hash" />
+        </main>
+      </SignedOut>
+
+      <SignedIn>
+        <Dashboard />
+      </SignedIn>
+    </div>
+  );
+}
+
+function Dashboard() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryRun[]>([]);
@@ -82,16 +111,7 @@ export default function App() {
   }
 
   return (
-    <div className={styles.app}>
-      <header className={styles.header}>
-        <div className={styles.headerInner}>
-          <div className={styles.titleGroup}>
-            <span className={styles.droplet}>💧</span>
-            <h1 className={styles.title}>Water Boiler</h1>
-          </div>
-        </div>
-      </header>
-
+    <>
       <main className={styles.main}>
         <div className={styles.grid}>
           {/* Left column on desktop: clock + status + history */}
@@ -135,6 +155,6 @@ export default function App() {
           onCancel={closeEditor}
         />
       )}
-    </div>
+    </>
   );
 }

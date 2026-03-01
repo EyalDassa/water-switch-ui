@@ -1,0 +1,119 @@
+name: Build and Publish
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. 2.0.0). Leave empty for auto-increment patch."
+        required: false
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-backend
+  FRONTEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-frontend
+
+jobs:
+  version:
+    if: github.repository == 'EyalDassa/water-switch-ui'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+            if [ -z "$LATEST" ]; then
+              VERSION="0.1.0"
+            else
+              BASE=${LATEST#v}
+              MAJOR=$(echo "$BASE" | cut -d. -f1)
+              MINOR=$(echo "$BASE" | cut -d. -f2)
+              PATCH=$(echo "$BASE" | cut -d. -f3)
+              VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - service: backend
+            context: ./backend
+            image: ghcr.io/eyaldassa/water-switch-ui-backend
+          - service: frontend
+            context: ./frontend
+            image: ghcr.io/eyaldassa/water-switch-ui-frontend
+            build-args: VITE_CLERK_PUBLISHABLE_KEY=${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          platforms: linux/arm64
+          build-args: ${{ matrix.build-args }}
+          tags: |
+            ${{ matrix.image }}:${{ needs.version.outputs.version }}
+            ${{ matrix.image }}:latest
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update docker-compose.yml
+        uses: fjogeleit/yaml-update-action@main
+        with:
+          branch: master
+          message: "release: v${{ needs.version.outputs.version }} [skip ci]"
+          changes: |
+            {
+              "docker-compose.yml": {
+                "services.frontend.image": "${{ env.FRONTEND_IMAGE }}:${{ needs.version.outputs.version }}",
+                "services.backend.image": "${{ env.BACKEND_IMAGE }}:${{ needs.version.outputs.version }}"
+              }
+            }
+
+      - name: Create version tag
+        run: |
+          git tag "v${{ needs.version.outputs.version }}"
+          git push origin "v${{ needs.version.outputs.version }}"

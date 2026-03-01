@@ -8,6 +8,7 @@ import styles from "./AnalogClock.module.css";
 export interface HistoryRun {
   startTime: string;       // "HH:MM"
   endTime: string | null;  // "HH:MM" or null if still running
+  date: string;            // "YYYY-MM-DD"
   durationSec: number;
 }
 
@@ -191,9 +192,10 @@ export function AnalogClock({ schedules, isOn, countdownStartTime, countdownEndT
     };
   });
 
-  // History arcs
+  // History arcs — only show today's runs on the 24h clock face
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const historyArcs = (history || [])
-    .filter((run) => run.endTime !== null)
+    .filter((run) => run.endTime !== null && run.date === today)
     .map((run, i) => ({
       startAngle: timeToAngle(run.startTime),
       endAngle: timeToAngle(run.endTime!),

@@ -7,6 +7,8 @@ RUN npm run build
 
 FROM node:22-alpine
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
 COPY --from=build /app/dist/server.js ./server.js
 EXPOSE 3001
 CMD ["node", "--dns-result-order=ipv4first", "server.js"]
