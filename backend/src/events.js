@@ -15,7 +15,7 @@ function getOrCreateGroup(deviceId, tuyaClient) {
     deviceGroups.set(deviceId, {
       clients: new Set(),
       tuyaClient,
-      cachedStatus: { isOn: false, countdownSeconds: 0 },
+      cachedStatus: { isOn: false, countdownSeconds: 0, online: true },
       pollInterval: null,
     });
   }
@@ -40,11 +40,21 @@ async function pollDeviceStatus(deviceId) {
 
   try {
     let dps;
+    let online = true;
     if (group.tuyaClient.isSharing) {
-      const result = await group.tuyaClient.getDeviceStatus(deviceId);
-      dps = Array.isArray(result) ? result : result?.status || result?.dpStatusRelationDTOS || [];
+      const [statusResult, infoResult] = await Promise.all([
+        group.tuyaClient.getDeviceStatus(deviceId),
+        group.tuyaClient.getDeviceInfo(deviceId).catch(() => null),
+      ]);
+      dps = Array.isArray(statusResult) ? statusResult : statusResult?.status || statusResult?.dpStatusRelationDTOS || [];
+      if (infoResult) online = infoResult.online ?? infoResult.isOnline ?? true;
     } else {
-      dps = await group.tuyaClient.get(`/v1.0/iot-03/devices/${deviceId}/status`);
+      const [statusResult, infoResult] = await Promise.all([
+        group.tuyaClient.get(`/v1.0/iot-03/devices/${deviceId}/status`),
+        group.tuyaClient.get(`/v1.0/devices/${deviceId}`).catch(() => null),
+      ]);
+      dps = statusResult;
+      if (infoResult) online = infoResult.online ?? true;
     }
 
     const switchDp = dps.find((dp) => dp.code === "switch_1") ?? dps.find((dp) => dp.code === "switch");
@@ -53,11 +63,13 @@ async function pollDeviceStatus(deviceId) {
     const newStatus = {
       isOn: switchDp?.value ?? false,
       countdownSeconds: countdownDp?.value ?? 0,
+      online,
     };
 
     const changed =
       newStatus.isOn !== group.cachedStatus.isOn ||
-      newStatus.countdownSeconds !== group.cachedStatus.countdownSeconds;
+      newStatus.countdownSeconds !== group.cachedStatus.countdownSeconds ||
+      newStatus.online !== group.cachedStatus.online;
 
     group.cachedStatus = newStatus;
 

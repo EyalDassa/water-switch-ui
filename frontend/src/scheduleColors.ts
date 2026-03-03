@@ -1,5 +1,5 @@
 // Distinct color palette for schedules — used on clock arcs and schedule list
-const PALETTE = [
+export const PALETTE = [
   "#3b82f6", // blue
   "#10b981", // emerald
   "#f59e0b", // amber
@@ -11,7 +11,7 @@ const PALETTE = [
 ];
 
 // Light fills for arcs (lower opacity versions)
-const PALETTE_LIGHT = [
+export const PALETTE_LIGHT = [
   "#93bbfd", // blue
   "#6ee7b7", // emerald
   "#fcd34d", // amber
@@ -22,22 +22,37 @@ const PALETTE_LIGHT = [
   "#fdba74", // orange
 ];
 
+/** Register an explicit color index for a groupId (from schedule data) */
+const explicitColors = new Map<string, number>();
+
+export function setScheduleColorIndex(groupId: string, index: number) {
+  explicitColors.set(groupId, index % PALETTE.length);
+}
+
 /**
  * Returns a stable color for a given schedule groupId.
- * Same groupId always gets the same color within a session.
+ * Uses explicit color if set, otherwise auto-assigns.
  */
-const colorCache = new Map<string, number>();
+const autoColors = new Map<string, number>();
 
 export function getScheduleColor(groupId: string): string {
-  if (!colorCache.has(groupId)) {
-    colorCache.set(groupId, colorCache.size % PALETTE.length);
+  if (explicitColors.has(groupId)) return PALETTE[explicitColors.get(groupId)!];
+  if (!autoColors.has(groupId)) {
+    autoColors.set(groupId, autoColors.size % PALETTE.length);
   }
-  return PALETTE[colorCache.get(groupId)!];
+  return PALETTE[autoColors.get(groupId)!];
 }
 
 export function getScheduleColorLight(groupId: string): string {
-  if (!colorCache.has(groupId)) {
-    colorCache.set(groupId, colorCache.size % PALETTE.length);
+  if (explicitColors.has(groupId)) return PALETTE_LIGHT[explicitColors.get(groupId)!];
+  if (!autoColors.has(groupId)) {
+    autoColors.set(groupId, autoColors.size % PALETTE.length);
   }
-  return PALETTE_LIGHT[colorCache.get(groupId)!];
+  return PALETTE_LIGHT[autoColors.get(groupId)!];
+}
+
+export function getColorIndex(groupId: string): number {
+  if (explicitColors.has(groupId)) return explicitColors.get(groupId)!;
+  if (autoColors.has(groupId)) return autoColors.get(groupId)!;
+  return 0;
 }

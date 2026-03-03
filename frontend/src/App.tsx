@@ -12,6 +12,9 @@ import { ScheduleEditor } from "./components/ScheduleEditor";
 import type { ScheduleEditData } from "./components/ScheduleEditor";
 import { HistoryCard } from "./components/HistoryCard";
 import { DeviceSetup } from "./components/DeviceSetup";
+import { TeamPanel } from "./components/TeamPanel";
+import { InviteModal } from "./components/InviteModal";
+import { setScheduleColorIndex } from "./scheduleColors";
 import styles from "./App.module.css";
 
 export default function App() {
@@ -64,15 +67,20 @@ function AuthenticatedApp() {
     );
   }
 
-  return <Dashboard />;
+  const meta = user?.publicMetadata as { role?: string; canInvite?: boolean } | undefined;
+  const role = (meta?.role || "admin") as "admin" | "member";
+  const userCanInvite = meta?.canInvite ?? role === "admin";
+
+  return <Dashboard role={role} canInvite={userCanInvite} />;
 }
 
-function Dashboard() {
+function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: boolean }) {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryRun[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [editorState, setEditorState] = useState<{ show: boolean; initial?: ScheduleEditData }>({ show: false });
+  const [showInvite, setShowInvite] = useState(false);
 
   const fetchSchedules = useCallback(async () => {
     try {
@@ -82,7 +90,14 @@ function Dashboard() {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setSchedules(data.schedules || []);
+      const scheds = data.schedules || [];
+      // Register explicit colors from schedule data
+      for (const s of scheds) {
+        if (s.groupId && s.colorIndex != null) {
+          setScheduleColorIndex(s.groupId, s.colorIndex);
+        }
+      }
+      setSchedules(scheds);
       setSchedulesError(null);
     } catch (err) {
       setSchedulesError(err instanceof Error ? err.message : "Failed to load schedules");
@@ -170,6 +185,11 @@ function Dashboard() {
             {schedulesError && (
               <p className={styles.schedulesError}>{schedulesError}</p>
             )}
+            <TeamPanel
+              role={role}
+              canInvite={canInvite}
+              onShowInvite={() => setShowInvite(true)}
+            />
           </div>
         </div>
       </main>
@@ -180,6 +200,10 @@ function Dashboard() {
           onSave={handleEditorSave}
           onCancel={closeEditor}
         />
+      )}
+
+      {showInvite && (
+        <InviteModal onClose={() => setShowInvite(false)} />
       )}
     </>
   );

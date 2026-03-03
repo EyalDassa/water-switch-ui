@@ -9,12 +9,21 @@ router.get("/status", async (req, res) => {
   const { deviceId } = req.deviceConfig;
   try {
     let dps;
+    let online = true;
     if (req.tuya.isSharing) {
-      const result = await req.tuya.getDeviceStatus(deviceId);
-      // Sharing API returns dpStatusRelationDTOS or similar; normalize
-      dps = Array.isArray(result) ? result : result?.status || result?.dpStatusRelationDTOS || [];
+      const [statusResult, infoResult] = await Promise.all([
+        req.tuya.getDeviceStatus(deviceId),
+        req.tuya.getDeviceInfo(deviceId).catch(() => null),
+      ]);
+      dps = Array.isArray(statusResult) ? statusResult : statusResult?.status || statusResult?.dpStatusRelationDTOS || [];
+      if (infoResult) online = infoResult.online ?? infoResult.isOnline ?? true;
     } else {
-      dps = await req.tuya.get(`/v1.0/iot-03/devices/${deviceId}/status`);
+      const [statusResult, infoResult] = await Promise.all([
+        req.tuya.get(`/v1.0/iot-03/devices/${deviceId}/status`),
+        req.tuya.get(`/v1.0/devices/${deviceId}`).catch(() => null),
+      ]);
+      dps = statusResult;
+      if (infoResult) online = infoResult.online ?? true;
     }
 
     const switchDp = dps.find((dp) => dp.code === "switch_1") ?? dps.find((dp) => dp.code === "switch");
@@ -23,6 +32,7 @@ router.get("/status", async (req, res) => {
     res.json({
       isOn: switchDp?.value ?? false,
       countdownSeconds: countdownDp?.value ?? 0,
+      online,
       rawDps: dps,
     });
   } catch (err) {
@@ -72,6 +82,31 @@ router.post("/toggle", async (req, res) => {
   }
 });
 
+// Fetch paginated logs for a single DP code (prevents countdown ticks drowning switch events)
+async function fetchLogs(tuya, deviceId, startTime, endTime, code) {
+  const seen = new Set();
+  const logs = [];
+  let lastRowKey = "";
+  const MAX_PAGES = 5;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : "";
+    const data = await tuya.get(
+      `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=${code}${rowKeyParam}`
+    );
+    for (const log of (data.logs || [])) {
+      const key = `${log.event_time}_${log.code}_${log.value}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        logs.push(log);
+      }
+    }
+    if (!data.has_next || !data.next_row_key || data.next_row_key === lastRowKey) break;
+    lastRowKey = data.next_row_key;
+  }
+  return logs;
+}
+
 // GET /api/history — 10 most recent ON/OFF run sessions from Tuya device logs
 router.get("/history", async (req, res) => {
   const { deviceId } = req.deviceConfig;
@@ -84,58 +119,43 @@ router.get("/history", async (req, res) => {
     // Sharing API may not support device logs — return empty gracefully
     if (req.tuya.isSharing) {
       try {
-        const data = await req.tuya.getDeviceLogs(deviceId, {
-          start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "switch_1,countdown_1",
-        });
-        const logs = data?.logs || [];
-        const switchEvents = logs.filter((l) => l.code === "switch_1" || l.code === "switch").sort((a, b) => a.event_time - b.event_time);
-        const countdownEvents = logs.filter((l) => l.code === "countdown_1" || l.code === "countdown").sort((a, b) => a.event_time - b.event_time);
+        const [switchData, countdownData] = await Promise.all([
+          req.tuya.getDeviceLogs(deviceId, { start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "switch_1" }),
+          req.tuya.getDeviceLogs(deviceId, { start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "countdown_1" }),
+        ]);
+        const switchEvents = (switchData?.logs || []).sort((a, b) => a.event_time - b.event_time);
+        const countdownEvents = (countdownData?.logs || []).sort((a, b) => a.event_time - b.event_time);
+        console.log(`[history] sharing: ${switchEvents.length} switch, ${countdownEvents.length} countdown`);
         const countdownSetEvents = findCountdownSetEvents(countdownEvents);
         const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, []);
         const runs = allRuns.slice(-10);
         const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
         return res.json({ runs, totalSeconds });
-      } catch {
+      } catch (err) {
+        console.error("[history] sharing logs failed:", err.message);
         return res.json({ runs: [], totalSeconds: 0 });
       }
     }
 
-    // Fetch automations to detect schedule-triggered events
-    const scheduleTimes = await getScheduleTimes(req.tuya, req.deviceConfig);
+    // Fetch automations + switch logs + countdown logs in parallel
+    // Fetched separately so countdown ticks don't drown out switch events
+    const [scheduleTimes, switchLogs, countdownLogs] = await Promise.all([
+      getScheduleTimes(req.tuya, req.deviceConfig),
+      fetchLogs(req.tuya, deviceId, startTime, endTime, "switch_1"),
+      fetchLogs(req.tuya, deviceId, startTime, endTime, "countdown_1"),
+    ]);
 
-    // Standard Tuya API — paginated logs (fetch both switch and countdown codes)
-    const seen = new Set();
-    const allLogs = [];
-    let lastRowKey = "";
-    const MAX_PAGES = 5;
+    const switchEvents = switchLogs.sort((a, b) => a.event_time - b.event_time);
+    const countdownEvents = countdownLogs.sort((a, b) => a.event_time - b.event_time);
 
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : "";
-      const data = await req.tuya.get(
-        `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=switch_1,countdown_1${rowKeyParam}`
-      );
-
-      const logs = data.logs || [];
-      for (const log of logs) {
-        const key = `${log.event_time}_${log.code}_${log.value}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          allLogs.push(log);
-        }
-      }
-
-      if (!data.has_next || !data.next_row_key) break;
-      lastRowKey = data.next_row_key;
-    }
-
-    const switchEvents = allLogs.filter((l) => l.code === "switch_1" || l.code === "switch").sort((a, b) => a.event_time - b.event_time);
-    const countdownEvents = allLogs.filter((l) => l.code === "countdown_1" || l.code === "countdown").sort((a, b) => a.event_time - b.event_time);
+    console.log(`[history] ${switchEvents.length} switch, ${countdownEvents.length} countdown`);
 
     const countdownSetEvents = findCountdownSetEvents(countdownEvents);
     const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes);
     const runs = allRuns.slice(-10);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
+    console.log(`[history] ${allRuns.length} total runs, returning ${runs.length}`);
     res.json({ runs, totalSeconds });
   } catch (err) {
     console.error("GET /history:", err.message);

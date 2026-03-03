@@ -11,20 +11,28 @@ interface Device {
   homeName: string;
 }
 
-type Step = "userCode" | "qrCode" | "selectDevice";
+interface PendingInvite {
+  adminUserId: string;
+  deviceName: string;
+  deviceId: string;
+  homeId: string;
+}
+
+type Step = "choose" | "userCode" | "qrCode" | "selectDevice";
 
 interface Props {
   onComplete: () => void;
 }
 
 export function DeviceSetup({ onComplete }: Props) {
-  const [step, setStep] = useState<Step>("userCode");
+  const [step, setStep] = useState<Step>("choose");
   const [userCode, setUserCode] = useState("");
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -33,6 +41,28 @@ export function DeviceSetup({ onComplete }: Props) {
       pollRef.current = null;
     }
     setPolling(false);
+  }, []);
+
+  // Check for pending email invite on mount
+  useEffect(() => {
+    async function checkInvite() {
+      try {
+        const res = await fetch("/api/team/check-invite");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.hasInvite) {
+          setPendingInvite({
+            adminUserId: data.adminUserId,
+            deviceName: data.deviceName,
+            deviceId: data.deviceId,
+            homeId: data.homeId,
+          });
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+    checkInvite();
   }, []);
 
   // Cleanup polling on unmount
@@ -60,7 +90,6 @@ export function DeviceSetup({ onComplete }: Props) {
           setDevices(data.devices || []);
           setStep("selectDevice");
         }
-        // "pending" → keep polling
       } catch (err) {
         stopPolling();
         setError(err instanceof Error ? err.message : "Polling failed");
@@ -86,8 +115,6 @@ export function DeviceSetup({ onComplete }: Props) {
 
       setQrCodeUrl(data.qrCodeUrl);
       setStep("qrCode");
-
-      // Start polling immediately with the token from this response
       startPolling(data.token, code);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error generating QR code");
@@ -119,21 +146,72 @@ export function DeviceSetup({ onComplete }: Props) {
     }
   }
 
+  async function handleAcceptInvite() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/team/accept-invite", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to accept invite");
+      onComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error accepting invite");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const isSetupFlow = step === "userCode" || step === "qrCode" || step === "selectDevice";
+
   return (
     <div className={styles.container}>
       <div className={styles.card}>
         <h2 className={styles.heading}>Connect Your Device</h2>
         <p className={styles.subtitle}>
-          Link your SmartLife account to control your water switch.
+          {step === "choose"
+            ? "Set up a new device or accept an invitation."
+            : "Link your SmartLife account to control your water switch."}
         </p>
 
-        <div className={styles.steps}>
-          <div className={`${styles.stepDot} ${step === "userCode" ? styles.active : styles.done}`}>1</div>
-          <div className={styles.stepLine} />
-          <div className={`${styles.stepDot} ${step === "qrCode" ? styles.active : step === "selectDevice" ? styles.done : ""}`}>2</div>
-          <div className={styles.stepLine} />
-          <div className={`${styles.stepDot} ${step === "selectDevice" ? styles.active : ""}`}>3</div>
-        </div>
+        {isSetupFlow && (
+          <div className={styles.steps}>
+            <div className={`${styles.stepDot} ${step === "userCode" ? styles.active : styles.done}`}>1</div>
+            <div className={styles.stepLine} />
+            <div className={`${styles.stepDot} ${step === "qrCode" ? styles.active : step === "selectDevice" ? styles.done : ""}`}>2</div>
+            <div className={styles.stepLine} />
+            <div className={`${styles.stepDot} ${step === "selectDevice" ? styles.active : ""}`}>3</div>
+          </div>
+        )}
+
+        {step === "choose" && (
+          <div className={styles.stepContent}>
+            {pendingInvite && (
+              <div className={styles.inviteBanner}>
+                <span className={styles.inviteBannerText}>
+                  You've been invited to join{" "}
+                  <span className={styles.inviteBannerDevice}>{pendingInvite.deviceName || "a device"}</span>
+                </span>
+                <button
+                  className={styles.primaryButton}
+                  onClick={handleAcceptInvite}
+                  disabled={loading}
+                >
+                  {loading ? "Joining..." : "Accept Invite"}
+                </button>
+              </div>
+            )}
+
+            <div className={styles.chooseOptions}>
+              <button className={styles.chooseCard} onClick={() => setStep("userCode")}>
+                <span className={styles.chooseIcon}>📱</span>
+                <div className={styles.chooseText}>
+                  <span className={styles.chooseTitle}>Set up new device</span>
+                  <span className={styles.chooseDesc}>Link via SmartLife QR code</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
 
         {step === "userCode" && (
           <form onSubmit={handleGenerateQR} className={styles.stepContent}>
@@ -162,6 +240,13 @@ export function DeviceSetup({ onComplete }: Props) {
               disabled={loading || !userCode.trim()}
             >
               {loading ? "Generating..." : "Generate QR Code"}
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => { setStep("choose"); setError(null); }}
+            >
+              Back
             </button>
           </form>
         )}

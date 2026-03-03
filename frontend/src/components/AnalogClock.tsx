@@ -361,16 +361,29 @@ export function AnalogClock({ schedules, isOn, countdownStartTime, countdownEndT
           />
         ))}
 
-        {/* Countdown arc — interactive */}
+        {/* Countdown arc — full window (faded) + remaining (active) */}
         {hasCountdown && (
-          <path
-            d={arcPath(timeToAngle(countdownStartTime!), timeToAngle(countdownEndTime!), OUTER_R, INNER_R)}
-            fill="#f97316"
-            style={{ cursor: "pointer", animation: "countdown-pulse 2s ease-in-out infinite" }}
-            onMouseEnter={() => setActiveId("countdown")}
-            onMouseLeave={() => setActiveId(null)}
-            onClick={(e) => handleArcClick("countdown", e)}
-          />
+          <>
+            {/* Full countdown window — faded */}
+            <path
+              d={arcPath(timeToAngle(countdownStartTime!), timeToAngle(countdownEndTime!), OUTER_R, INNER_R)}
+              fill="#f97316"
+              opacity={0.2}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setActiveId("countdown")}
+              onMouseLeave={() => setActiveId(null)}
+              onClick={(e) => handleArcClick("countdown", e)}
+            />
+            {/* Remaining portion — active with pulse */}
+            <path
+              d={arcPath(currentAngle, timeToAngle(countdownEndTime!), OUTER_R, INNER_R)}
+              fill="#f97316"
+              style={{ cursor: "pointer", animation: "countdown-pulse 2s ease-in-out infinite" }}
+              onMouseEnter={() => setActiveId("countdown")}
+              onMouseLeave={() => setActiveId(null)}
+              onClick={(e) => handleArcClick("countdown", e)}
+            />
+          </>
         )}
 
         {/* Clock face */}

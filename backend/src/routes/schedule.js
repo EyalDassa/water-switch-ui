@@ -39,6 +39,19 @@ function diffMinutes(start, end) {
   return diff > 0 ? diff : diff + 24 * 60;
 }
 
+// ── Color index encoding in automation name ─────────────────────────────────
+// Format: "Schedule Name[c:3]" — suffix stripped for display, parsed for colorIndex
+function encodeColorInName(name, colorIndex) {
+  if (colorIndex == null) return name;
+  return `${name}[c:${colorIndex}]`;
+}
+
+function decodeColorFromName(rawName) {
+  const match = rawName?.match(/^(.*?)\[c:(\d+)\]$/);
+  if (match) return { name: match[1], colorIndex: parseInt(match[2], 10) };
+  return { name: rawName, colorIndex: undefined };
+}
+
 // ── Parse a Tuya automation into our schedule shape ──────────────────────────
 function parseAutomation(a, deviceId) {
   const cond = a.conditions?.[0]?.display;
@@ -51,10 +64,12 @@ function parseAutomation(a, deviceId) {
   const startTime = cond.time; // "HH:MM"
   const endTime = addMinutes(startTime, Math.round(countdownSec / 60));
   const days = loopsToDays(cond.loops || "0000000");
+  const { name, colorIndex } = decodeColorFromName(a.name);
 
   return {
     id: a.automation_id,
-    name: a.name,
+    name,
+    colorIndex,
     isEnabled: a.enabled,
     startTime,
     endTime,
@@ -84,8 +99,8 @@ router.get("/schedules", async (req, res) => {
 
     // Return in the on/off pair format the frontend expects
     const schedules = ours.flatMap((s) => [
-      { id: s.id + ":on",  groupId: s.id, name: s.name, isEnabled: s.isEnabled, time: s.startTime, days: s.days, action: "on" },
-      { id: s.id + ":off", groupId: s.id, name: s.name, isEnabled: s.isEnabled, time: s.endTime,   days: s.days, action: "off" },
+      { id: s.id + ":on",  groupId: s.id, name: s.name, colorIndex: s.colorIndex, isEnabled: s.isEnabled, time: s.startTime, days: s.days, action: "on" },
+      { id: s.id + ":off", groupId: s.id, name: s.name, colorIndex: s.colorIndex, isEnabled: s.isEnabled, time: s.endTime,   days: s.days, action: "off" },
     ]);
     res.json({ schedules });
   } catch (err) {
@@ -100,7 +115,7 @@ router.post("/schedules", async (req, res) => {
     return res.status(501).json({ error: "Schedule creation not yet supported for shared devices" });
   }
   const { deviceId, homeId } = req.deviceConfig;
-  const { name, startTime, endTime, days = ["daily"] } = req.body;
+  const { name, startTime, endTime, days = ["daily"], colorIndex } = req.body;
   if (!startTime || !endTime) {
     return res.status(400).json({ error: "startTime and endTime required (HH:MM)" });
   }
@@ -109,10 +124,11 @@ router.post("/schedules", async (req, res) => {
   const countdownSec = durationMin * 60;
   const loops = daysToLoops(days);
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const displayName = name || `Water ${startTime} (${durationMin}m)`;
 
   try {
     const automationId = await req.tuya.post(`/v1.0/homes/${homeId}/automations`, {
-      name: name || `Water ${startTime} (${durationMin}m)`,
+      name: encodeColorInName(displayName, colorIndex),
       background: AUTOMATION_BG,
       conditions: [{
         display: {
@@ -148,7 +164,7 @@ router.put("/schedules/:id", async (req, res) => {
   }
   const { deviceId, homeId } = req.deviceConfig;
   const autoId = req.params.id.replace(/:on$|:off$/, "");
-  const { name, startTime, endTime, days = ["daily"] } = req.body;
+  const { name, startTime, endTime, days = ["daily"], colorIndex } = req.body;
   if (!startTime || !endTime) {
     return res.status(400).json({ error: "startTime and endTime required (HH:MM)" });
   }
@@ -157,10 +173,11 @@ router.put("/schedules/:id", async (req, res) => {
   const countdownSec = durationMin * 60;
   const loops = daysToLoops(days);
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const displayName = name || `Water ${startTime} (${durationMin}m)`;
 
   try {
     await req.tuya.put(`/v1.0/homes/${homeId}/automations/${autoId}`, {
-      name: name || `Water ${startTime} (${durationMin}m)`,
+      name: encodeColorInName(displayName, colorIndex),
       background: AUTOMATION_BG,
       conditions: [{
         display: {

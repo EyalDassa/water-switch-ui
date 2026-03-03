@@ -149,7 +149,7 @@ router.post("/setup/select-device", async (req, res) => {
 
   try {
     await clerk.users.updateUserMetadata(userId, {
-      publicMetadata: { deviceId, homeId, deviceName: deviceName || null, configured: true },
+      publicMetadata: { deviceId, homeId, deviceName: deviceName || null, configured: true, role: "admin", team: [] },
     });
     res.json({ success: true });
   } catch (err) {

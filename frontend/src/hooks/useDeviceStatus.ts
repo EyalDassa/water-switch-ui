@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 export interface DeviceStatus {
   isOn: boolean;
   countdownSeconds: number;
+  online: boolean;
   lastUpdated: Date | null;
   error: string | null;
   loading: boolean;
@@ -20,6 +21,7 @@ export function useDeviceStatus(onSchedulesChanged?: () => void) {
   const [status, setStatus] = useState<DeviceStatus>({
     isOn: false,
     countdownSeconds: 0,
+    online: true,
     lastUpdated: null,
     error: null,
     loading: true,
@@ -32,7 +34,7 @@ export function useDeviceStatus(onSchedulesChanged?: () => void) {
   const schedulesChangedRef = useRef(onSchedulesChanged);
   schedulesChangedRef.current = onSchedulesChanged;
 
-  const processStatus = useCallback((data: { isOn: boolean; countdownSeconds: number }) => {
+  const processStatus = useCallback((data: { isOn: boolean; countdownSeconds: number; online?: boolean }) => {
     const countdown = data.countdownSeconds ?? 0;
 
     let countdownStartTime: string | null = null;
@@ -59,6 +61,7 @@ export function useDeviceStatus(onSchedulesChanged?: () => void) {
     setStatus({
       isOn: data.isOn,
       countdownSeconds: countdown,
+      online: data.online ?? true,
       lastUpdated: new Date(),
       error: null,
       loading: false,

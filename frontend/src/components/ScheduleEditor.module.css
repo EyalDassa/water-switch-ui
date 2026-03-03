@@ -94,6 +94,31 @@
   opacity: 0.6;
 }
 
+.colorPicker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.colorSwatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  cursor: pointer;
+  transition: all 0.12s;
+  box-sizing: border-box;
+}
+
+.colorSwatch:hover {
+  transform: scale(1.1);
+}
+
+.colorActive {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px white inset;
+}
+
 .timeInput {
   border: 1.5px solid var(--border);
   border-radius: 10px;

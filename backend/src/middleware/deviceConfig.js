@@ -40,10 +40,22 @@ export async function extractDeviceConfig(req, res, next) {
     return next();
   }
 
-  // Fetch user's Tuya tokens from Clerk privateMetadata → create SharingClient
+  // Members use the admin's Tuya credentials
+  const adminUserId = pub?.adminUserId;
+  const credentialsUserId = adminUserId || userId;
+
+  // Check if the credentials owner's client is already cached
+  if (adminUserId && userClients.has(adminUserId)) {
+    const adminClient = userClients.get(adminUserId);
+    userClients.set(userId, adminClient);
+    req.tuya = adminClient;
+    return next();
+  }
+
+  // Fetch Tuya tokens from the credentials owner (admin or self)
   try {
-    const user = await clerk.users.getUser(userId);
-    const priv = user.privateMetadata;
+    const credUser = await clerk.users.getUser(credentialsUserId);
+    const priv = credUser.privateMetadata;
 
     if (priv?.tuyaAccessToken) {
       const endpoint = priv.tuyaEndpoint || `https://apigw.tuya${priv.tuyaRegion || "eu"}.com`;
@@ -53,18 +65,19 @@ export async function extractDeviceConfig(req, res, next) {
         refreshToken: priv.tuyaRefreshToken,
         endpoint,
         onTokenRefresh: async (newToken, newRefresh) => {
-          await clerk.users.updateUserMetadata(userId, {
+          await clerk.users.updateUserMetadata(credentialsUserId, {
             privateMetadata: { ...priv, tuyaAccessToken: newToken, tuyaRefreshToken: newRefresh },
           });
         },
       });
-      userClients.set(userId, client);
+      userClients.set(credentialsUserId, client);
+      if (adminUserId) userClients.set(userId, client);
       req.tuya = client;
     } else {
       req.tuya = defaultClient;
     }
   } catch (err) {
-    console.error(`[deviceConfig] Failed to load Tuya tokens for ${userId}:`, err.message);
+    console.error(`[deviceConfig] Failed to load Tuya tokens for ${credentialsUserId}:`, err.message);
     req.tuya = defaultClient;
   }
 

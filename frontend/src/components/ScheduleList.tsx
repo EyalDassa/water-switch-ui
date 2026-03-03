@@ -50,6 +50,7 @@ export function ScheduleList({ schedules, onChanged, onEdit }: Props) {
     onEdit({
       id: on.groupId,
       name: on.name,
+      colorIndex: on.colorIndex,
       startTime: on.time,
       endTime: off?.time || on.time,
       days: on.days,

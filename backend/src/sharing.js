@@ -193,6 +193,11 @@ export class SharingClient {
     return this.#request("GET", `/v1.0/m/life/devices/${deviceId}/status`);
   }
 
+  /** Get device info (includes online field) */
+  async getDeviceInfo(deviceId) {
+    return this.#request("GET", `/v1.0/m/life/devices/${deviceId}`);
+  }
+
   /** Send commands to a device */
   async sendCommands(deviceId, commands) {
     return this.#request("POST", `/v1.1/m/thing/${deviceId}/commands`, null, { commands });

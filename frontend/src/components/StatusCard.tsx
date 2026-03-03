@@ -10,6 +10,7 @@ export interface Schedule {
   id: string;
   groupId?: string;
   name?: string;
+  colorIndex?: number;
   isEnabled: boolean;
   time: string; // "HH:MM"
   days: string[];
@@ -80,12 +81,19 @@ export function StatusCard({ status, schedules }: Props) {
         )}
       </div>
 
+      {!status.online && (
+        <div className={styles.offlineBanner}>
+          <span className={styles.offlineIcon}>⚡</span>
+          <span>Device offline — no power or disconnected</span>
+        </div>
+      )}
+
       <div className={styles.statusRow}>
         <span
-          className={`${styles.dot} ${status.isOn ? styles.dotOn : styles.dotOff}`}
+          className={`${styles.dot} ${!status.online ? styles.dotOffline : status.isOn ? styles.dotOn : styles.dotOff}`}
         />
-        <span className={`${styles.statusText} ${status.isOn ? styles.on : styles.off}`}>
-          {status.loading ? "Loading…" : status.isOn ? "ON" : "OFF"}
+        <span className={`${styles.statusText} ${!status.online ? styles.offline : status.isOn ? styles.on : styles.off}`}>
+          {status.loading ? "Loading…" : !status.online ? "OFFLINE" : status.isOn ? "ON" : "OFF"}
         </span>
       </div>
 

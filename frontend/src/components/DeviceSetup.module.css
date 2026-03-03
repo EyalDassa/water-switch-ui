@@ -273,6 +273,78 @@
   padding: 20px 0;
 }
 
+/* Choose step — option cards */
+.chooseOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chooseCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #f8fafc;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+  transition: all 0.12s;
+  cursor: pointer;
+}
+
+.chooseCard:hover {
+  border-color: var(--primary);
+  background: #eff6ff;
+}
+
+.chooseCard:active {
+  transform: scale(0.98);
+}
+
+.chooseIcon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.chooseText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chooseTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chooseDesc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Invite banner */
+.inviteBanner {
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inviteBannerText {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.inviteBannerDevice {
+  font-weight: 600;
+}
+
 /* Error */
 .error {
   font-size: 13px;

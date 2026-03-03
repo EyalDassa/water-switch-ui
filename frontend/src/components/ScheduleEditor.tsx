@@ -1,9 +1,11 @@
 import { useState } from "react";
 import styles from "./ScheduleEditor.module.css";
+import { PALETTE } from "../scheduleColors";
 
 export interface ScheduleEditData {
   id?: string;        // present when editing
   name?: string;
+  colorIndex?: number;
   startTime: string;
   endTime: string;
   days: string[];
@@ -44,6 +46,7 @@ export function ScheduleEditor({ initial, onSave, onCancel }: Props) {
   const [customDays, setCustomDays] = useState<string[]>(
     initial && detectRepeatMode(initial.days) === "custom" ? initial.days : ["mon", "tue", "wed", "thu", "fri"]
   );
+  const [colorIndex, setColorIndex] = useState<number>(initial?.colorIndex ?? 0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +76,7 @@ export function ScheduleEditor({ initial, onSave, onCancel }: Props) {
     setError(null);
 
     try {
-      const payload = { name: name || undefined, startTime, endTime, days };
+      const payload = { name: name || undefined, startTime, endTime, days, colorIndex };
 
       const res = isEditing
         ? await fetch(`/api/schedules/${initial!.id}`, {
@@ -114,6 +117,22 @@ export function ScheduleEditor({ initial, onSave, onCancel }: Props) {
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Morning boost"
             />
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.fieldLabel}>Color</label>
+            <div className={styles.colorPicker}>
+              {PALETTE.map((color, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`${styles.colorSwatch} ${colorIndex === i ? styles.colorActive : ""}`}
+                  style={{ background: color }}
+                  onClick={() => setColorIndex(i)}
+                  aria-label={`Color ${i + 1}`}
+                />
+              ))}
+            </div>
           </div>
 
           <div className={styles.timeRow}>

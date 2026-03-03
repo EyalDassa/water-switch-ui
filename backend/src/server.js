@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { extractDeviceConfig, requireDevice } from "./middleware/deviceConfig.js";
 import setupRoutes from "./routes/setup.js";
+import teamRoutes from "./routes/team.js";
 import deviceRoutes from "./routes/device.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { sseHandler, startBackgroundPoll } from "./events.js";
@@ -47,6 +48,9 @@ function requireApiAuth(req, res, next) {
 
 // Setup routes — no device required (this IS the device setup)
 app.use("/api", requireApiAuth, setupRoutes);
+
+// Team routes — invite/join don't require device; admin ops check internally
+app.use("/api", requireApiAuth, teamRoutes);
 
 // SSE endpoint — requires configured device
 app.get("/api/events", requireApiAuth, extractDeviceConfig, sseHandler);

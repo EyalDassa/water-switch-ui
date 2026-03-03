@@ -1,0 +1,119 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: white;
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 400px;
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px 0;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.closeButton {
+  background: #f1f5f9;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.closeButton:hover {
+  background: #e2e8f0;
+}
+
+.content {
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.emailRow {
+  display: flex;
+  gap: 8px;
+}
+
+.emailInput {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.emailInput:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.emailInput::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.sendButton {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--primary);
+  color: white;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.sendButton:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.sendButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.success {
+  font-size: 13px;
+  color: var(--success);
+  text-align: center;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--danger);
+  background: rgba(239,68,68,0.08);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
