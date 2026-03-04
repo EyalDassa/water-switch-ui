@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,20 +47,27 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
+      - name: Generate build matrix
+        id: matrix
+        run: |
+          MATRIX=$(cat <<EOF
+          {
+            "include": [
+              { "service": "backend",  "context": "./backend",  "image": "$BACKEND_IMAGE" },
+              { "service": "frontend", "context": "./frontend", "image": "$FRONTEND_IMAGE" }
+            ]
+          }
+          EOF
+          )
+          echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
+
   build:
     needs: version
     runs-on: ubuntu-latest
     permissions:
       packages: write
     strategy:
-      matrix:
-        include:
-          - service: backend
-            context: ./backend
-            image: ${{ env.BACKEND_IMAGE }}
-          - service: frontend
-            context: ./frontend
-            image: ${{ env.FRONTEND_IMAGE }}
+      matrix: ${{ fromJson(needs.version.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
