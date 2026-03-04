@@ -279,7 +279,7 @@ router.post("/countdown", async (req, res) => {
         ],
       });
     }
-    recordAction(deviceId, "countdown", "on");
+    recordAction(deviceId, "countdown", "on", req.deviceConfig.userId);
     res.json({ success: true, countdownSeconds: seconds });
     notifyStatusChange(deviceId, req.tuya);
   } catch (err) {

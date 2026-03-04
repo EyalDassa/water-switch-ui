@@ -94,12 +94,41 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
 
   // Member view
   if (role === "member") {
+    const memberTeam = teamInfo.team || [];
     return (
       <div className={styles.card}>
-        <span className={styles.label}>Team</span>
-        <div className={styles.sharedInfo}>
-          Shared by {teamInfo.adminName || "admin"}
+        <div className={styles.header}>
+          <span className={styles.label}>Team</span>
+          {canInvite && (
+            <button className={styles.inviteButton} onClick={onShowInvite}>
+              + Invite
+            </button>
+          )}
         </div>
+
+        {memberTeam.length > 0 && (
+          <div className={styles.memberList}>
+            {memberTeam.map((member) => (
+              <div key={member.userId} className={styles.memberRow}>
+                {member.imageUrl ? (
+                  <img src={member.imageUrl} alt="" className={styles.avatar} />
+                ) : (
+                  <div className={styles.avatarPlaceholder}>
+                    {(member.name || member.email || "?")[0].toUpperCase()}
+                  </div>
+                )}
+                <div className={styles.memberInfo}>
+                  <span className={styles.memberName}>{member.name}</span>
+                  <span className={styles.memberEmail}>{member.email}</span>
+                </div>
+                {(member as TeamMember & { role?: string }).role === "admin" && (
+                  <span className={styles.memberBadge}>Admin</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <button className={styles.leaveButton} onClick={leaveTeam}>
           Leave Team
         </button>

@@ -14,9 +14,10 @@ const entries = [];
  * @param {string} deviceId
  * @param {"toggle"|"countdown"} type
  * @param {"on"|"off"} action
+ * @param {string|null} [userId]
  */
-export function recordAction(deviceId, type, action) {
-  entries.push({ deviceId, type, action, timestamp: Date.now() });
+export function recordAction(deviceId, type, action, userId = null) {
+  entries.push({ deviceId, type, action, timestamp: Date.now(), userId });
   if (entries.length > MAX_ENTRIES) {
     entries.splice(0, entries.length - MAX_ENTRIES);
   }
@@ -29,14 +30,14 @@ export function recordAction(deviceId, type, action) {
  * @param {string} deviceId
  * @param {number} eventTimestamp - millisecond timestamp from Tuya log
  * @param {string} action - "on" or "off"
- * @returns {{ type: "toggle"|"countdown" } | null}
+ * @returns {{ type: "toggle"|"countdown", userId: string|null } | null}
  */
 export function findOurAction(deviceId, eventTimestamp, action) {
   const WINDOW_MS = 10_000;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (e.deviceId === deviceId && e.action === action && Math.abs(e.timestamp - eventTimestamp) < WINDOW_MS) {
-      return { type: e.type };
+      return { type: e.type, userId: e.userId };
     }
     if (eventTimestamp - e.timestamp > 60_000) break;
   }

@@ -18,6 +18,7 @@ export interface HistoryRun {
   date: string;            // "YYYY-MM-DD"
   durationSec: number;
   source?: RunSource;
+  userName?: string;
 }
 
 interface Props {

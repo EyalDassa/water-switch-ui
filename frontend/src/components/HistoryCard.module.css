@@ -80,6 +80,10 @@
   opacity: 0.85;
 }
 
+.userName {
+  opacity: 0.7;
+}
+
 .duration {
   color: var(--text-muted);
   margin-left: auto;

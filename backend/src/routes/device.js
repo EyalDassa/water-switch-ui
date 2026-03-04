@@ -1,6 +1,9 @@
 import { Router } from "express";
+import { createClerkClient } from "@clerk/express";
 import { notifyStatusChange } from "../events.js";
 import { recordAction, findOurAction } from "../actionTracker.js";
+
+const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 const router = Router();
 
@@ -59,7 +62,7 @@ router.post("/toggle", async (req, res) => {
         commands: [{ code: "switch_1", value }],
       });
     }
-    recordAction(deviceId, "toggle", action);
+    recordAction(deviceId, "toggle", action, req.deviceConfig.userId);
     res.json({ success: true, isOn: value });
     notifyStatusChange(deviceId, req.tuya);
   } catch (firstErr) {
@@ -72,7 +75,7 @@ router.post("/toggle", async (req, res) => {
           commands: [{ code: "switch", value }],
         });
       }
-      recordAction(deviceId, "toggle", action);
+      recordAction(deviceId, "toggle", action, req.deviceConfig.userId);
       res.json({ success: true, isOn: value });
       notifyStatusChange(deviceId, req.tuya);
     } catch (err) {
@@ -129,6 +132,7 @@ router.get("/history", async (req, res) => {
         const countdownSetEvents = findCountdownSetEvents(countdownEvents);
         const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, []);
         const runs = allRuns.slice(-10);
+        await resolveUserNames(runs);
         const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
         return res.json({ runs, totalSeconds });
       } catch (err) {
@@ -153,6 +157,7 @@ router.get("/history", async (req, res) => {
     const countdownSetEvents = findCountdownSetEvents(countdownEvents);
     const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes);
     const runs = allRuns.slice(-10);
+    await resolveUserNames(runs);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
     console.log(`[history] ${allRuns.length} total runs, returning ${runs.length}`);
@@ -236,8 +241,8 @@ function fmtHHMM(d) {
 function classifyEvent(event, deviceId) {
   const action = (event.value === "true" || event.value === true) ? "on" : "off";
   const ours = findOurAction(deviceId, event.event_time, action);
-  if (ours) return ours.type; // "toggle" or "countdown"
-  return "external";
+  if (ours) return { type: ours.type, userId: ours.userId };
+  return { type: "external", userId: null };
 }
 
 // Determine the run's display source from the ON event classification + context
@@ -251,6 +256,31 @@ function determineRunSource(onSource, hasCountdown, isScheduled) {
   return "external";
 }
 
+// Batch-resolve userIds to display names, mutates runs in place
+async function resolveUserNames(runs) {
+  const userIds = [...new Set(runs.filter((r) => r.userId).map((r) => r.userId))];
+  if (userIds.length === 0) {
+    for (const r of runs) delete r.userId;
+    return;
+  }
+  try {
+    const users = await clerk.users.getUserList({ userId: userIds, limit: 100 });
+    const nameMap = {};
+    for (const u of users.data) {
+      nameMap[u.id] = u.firstName || u.emailAddresses?.[0]?.emailAddress || "User";
+    }
+    for (const run of runs) {
+      if (run.userId && nameMap[run.userId]) {
+        run.userName = nameMap[run.userId];
+      }
+      delete run.userId;
+    }
+  } catch (err) {
+    console.warn("[history] Failed to resolve user names:", err.message);
+    for (const r of runs) delete r.userId;
+  }
+}
+
 function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTimes) {
   const allRuns = [];
   let onEvent = null;
@@ -262,18 +292,19 @@ function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTim
       const startDate = new Date(onEvent.event_time);
       const durationSec = Math.round((event.event_time - onEvent.event_time) / 1000);
 
-      const onSource = classifyEvent(onEvent, deviceId);
+      const onClassification = classifyEvent(onEvent, deviceId);
       const hasCountdown = countdownEvents.some(
         (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
       );
-      const isScheduled = onSource === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+      const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
 
       allRuns.push({
         startTime: fmtHHMM(startDate),
         endTime: fmtHHMM(new Date(event.event_time)),
         date: fmtDate(startDate),
         durationSec,
-        source: determineRunSource(onSource, hasCountdown, isScheduled),
+        source: determineRunSource(onClassification.type, hasCountdown, isScheduled),
+        userId: onClassification.userId,
       });
       onEvent = null;
     }
@@ -282,17 +313,18 @@ function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTim
   if (onEvent) {
     const startDate = new Date(onEvent.event_time);
     const durationSec = Math.round((endTime - onEvent.event_time) / 1000);
-    const onSource = classifyEvent(onEvent, deviceId);
+    const onClassification = classifyEvent(onEvent, deviceId);
     const hasCountdown = countdownEvents.some(
       (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
     );
-    const isScheduled = onSource === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+    const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
     allRuns.push({
       startTime: fmtHHMM(startDate),
       endTime: null,
       date: fmtDate(startDate),
       durationSec,
-      source: determineRunSource(onSource, hasCountdown, isScheduled),
+      source: determineRunSource(onClassification.type, hasCountdown, isScheduled),
+      userId: onClassification.userId,
     });
   }
 

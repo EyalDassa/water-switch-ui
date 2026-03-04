@@ -79,6 +79,7 @@ export function HistoryCard({ runs }: Props) {
                 {run.source && SOURCE_LABELS[run.source] && (
                   <span className={styles.source} style={{ color: SOURCE_LABELS[run.source].color }}>
                     {SOURCE_LABELS[run.source].text}
+                    {run.userName && <span className={styles.userName}> · {run.userName}</span>}
                   </span>
                 )}
                 <span className={styles.duration}>{formatDuration(run.durationSec)}</span>
