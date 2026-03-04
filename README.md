@@ -1,196 +1,134 @@
 # Water Boiler UI
 
-A custom web interface for your Toya smart water boiler switch (via SmartLife / Tuya IoT platform).
+A smarter way to control your water boiler. No more fumbling through the SmartLife app — just open a link and you're in.
 
-Features: 24h analog schedule clock, manual on/off, schedule editor, countdown timer.
+Built for any Tuya/SmartLife-compatible smart switch. Runs on a Raspberry Pi at home and gives you a clean, fast web app accessible from anywhere.
 
----
-
-## How it works
-
-```
-Your Phone/Browser  →  Cloudflare Tunnel  →  Raspberry Pi  →  Tuya Cloud API  →  Your Switch
-```
-
-The backend runs on your home server (Pi). Cloudflare Tunnel gives you a secure HTTPS URL accessible from anywhere — no port forwarding needed.
+**Try it out:** [boiler.parligator.com](https://boiler.parligator.com)
 
 ---
 
-## Step 1 — Get Tuya API credentials
+## Features
 
-This only needs to be done once.
+### See your whole day at a glance
 
-### 1.1 Register as a developer
+A 24-hour analog clock shows when the boiler is scheduled to run, when it actually ran, and whether it's on right now — all in one view.
 
-1. Go to [developer.tuya.com](https://developer.tuya.com) and create a free account.
-2. Complete email verification.
+### One-tap control
 
-### 1.2 Create a Cloud Project
+Toggle the boiler on or off instantly. Need hot water in 30 minutes? Set a quick timer and forget about it.
 
-1. Log in → **Cloud** → **Development** → **Create Cloud Project**
-2. Fill in:
-   - Name: anything (e.g. "Home Boiler")
-   - Industry: **Smart Home**
-   - Development Method: **Custom**
-   - Data Center: choose your region:
-     - 🇮🇱 Israel / Middle East → **Central Europe Data Center**
-     - 🇺🇸 Americas → **Western America Data Center**
-3. On the next screen "Authorize API Services", scroll down and make sure these are subscribed:
-   - **IoT Core**
-   - **Device Status Notification**
-   - Click **Authorize**
+### Smart schedules
 
-### 1.3 Get your Access ID and Secret
+Create recurring schedules with custom colors. The clock face lights up with colored arcs so you can see your hot water windows without reading a single number.
 
-1. Go to your project → **Overview** tab
-2. Copy **Access ID (Client ID)** and **Access Secret (Client Secret)**
+### Activity history
 
-### 1.4 Link your SmartLife account
+See the last 10 sessions — when they started, how long they ran, and whether they were triggered by a schedule, a manual tap, a timer, or directly from SmartLife.
 
-1. In your project → **Devices** tab → **Link Tuya App Account**
-2. Click **Add App Account**
-3. Open the **SmartLife** app on your phone
-4. Go to **Me** → scan the QR code shown on the Tuya dashboard
-5. Your devices should appear under the project's device list
+### Household sharing
 
-### 1.5 Find your Device ID
+Invite family members by email. Everyone gets their own login and can control the boiler. The admin sees who did what and when.
 
-1. In the Tuya dashboard → **Devices** tab → find your water boiler switch
-2. Copy the **Device ID** (a long alphanumeric string)
+- Admin sets up the device once, then invites members
+- Members can toggle, set timers, and view history
+- Admin can rename the device (syncs everywhere, including Tuya)
+- Admin can grant invite permissions to members
+- Activity log shows which member triggered each action
+
+### Works from anywhere
+
+Runs behind a Cloudflare Tunnel, so you get a secure HTTPS link that works from any phone or browser, anywhere in the world.
 
 ---
 
-## Step 2 — Configure the backend
+## Want to run your own?
+
+This project is fully open source. If you have a Tuya-compatible smart switch, you can fork this repo and set it up for yourself.
+
+### What you'll need
+
+- A smart switch connected to the [SmartLife](https://www.tuya.com/product/1694661057) app
+- A Raspberry Pi (or any always-on machine with Node.js 18+)
+- A free [Tuya developer account](https://developer.tuya.com) for API access
+- A free [Clerk account](https://clerk.com) for user authentication
+- (Optional) A Cloudflare domain for remote access
+
+### Quick start
 
 ```bash
-cd backend
-cp .env.example .env
+git clone https://github.com/EyalDassa/water-switch-ui.git
+cd water-switch-ui
+cd backend && npm install && cd ..
+cd frontend && npm install && cd ..
 ```
 
-Edit `.env`:
+Copy the example env file and fill in your credentials:
+
+```bash
+cp backend/.env.example backend/.env
+```
 
 ```env
-ACCESS_ID=your_access_id_here
-ACCESS_SECRET=your_access_secret_here
-DEVICE_ID=your_device_id_here
-TUYA_REGION=eu          # use "eu" for Israel/Europe
+ACCESS_ID=your_tuya_access_id
+ACCESS_SECRET=your_tuya_access_secret
+DEVICE_ID=your_device_id
+TUYA_REGION=eu                              # eu, us, cn, or in
 PORT=3001
+CLERK_SECRET_KEY=sk_live_...
+CLERK_PUBLISHABLE_KEY=pk_live_...
+APP_URL=https://boiler.yourdomain.com       # for invite email redirects
 ```
 
-> **Region guide:**
-> - Israel / Europe: `eu`
-> - USA / Americas: `us`
-> - China: `cn`
-> - India: `in`
-
----
-
-## Step 3 — Run the app
-
-### Development (on your PC, to test first)
-
-Open two terminals:
-
 ```bash
-# Terminal 1 — backend
-cd backend
-npm start
-
-# Terminal 2 — frontend dev server
-cd frontend
-npm run dev
+echo "VITE_CLERK_PUBLISHABLE_KEY=pk_live_..." > frontend/.env
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-The Vite dev server proxies `/api` requests to the backend automatically.
-
-### Production (on Raspberry Pi / home server)
+**Development:**
 
 ```bash
-# Build the frontend once
-cd frontend
-npm run build
-
-# Start the backend (it also serves the built frontend)
-cd backend
-npm start
+cd backend && npm run dev     # Terminal 1
+cd frontend && npm run dev    # Terminal 2 — opens on :5173
 ```
 
-Open [http://localhost:3001](http://localhost:3001) — the full app is served from one port.
-
----
-
-## Step 4 — Access from anywhere (Cloudflare Tunnel)
-
-This gives you a permanent HTTPS URL so you can open the app from your phone anywhere.
-
-### Install cloudflared on the Pi
+**Production:**
 
 ```bash
-# Raspberry Pi / Debian / Ubuntu
+cd frontend && npm run build
+cd backend && npm run build && npm start    # Serves everything on :3001
+```
+
+### Getting Tuya API credentials
+
+1. Go to [developer.tuya.com](https://developer.tuya.com) → **Cloud** → **Development** → **Create Cloud Project**
+   - Industry: Smart Home, Development Method: Custom
+   - Data Center: pick your region (Central Europe for Israel/EU, Western America for US, etc.)
+   - Authorize **IoT Core** and **Device Status Notification** APIs
+2. Copy your **Access ID** and **Access Secret**
+3. **Devices** tab → **Link Tuya App Account** → scan the QR code with your SmartLife app
+4. Find your switch and copy its **Device ID**
+
+### Remote access with Cloudflare Tunnel
+
+```bash
+# Install on your Pi
 wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
 sudo dpkg -i cloudflared-linux-arm64.deb
-```
 
-> For 32-bit Pi use `cloudflared-linux-arm.deb`. For x86 use `cloudflared-linux-amd64.deb`.
+# Quick test (temporary URL)
+cloudflared tunnel --url http://localhost:3001
 
-### Authenticate
-
-```bash
+# Permanent setup
 cloudflared tunnel login
-# Opens a browser — log in to Cloudflare (free account is fine)
-```
-
-### Create a tunnel
-
-```bash
 cloudflared tunnel create boiler
 cloudflared tunnel route dns boiler boiler.yourdomain.com
-```
-
-> You need a domain managed on Cloudflare. If you don't have one, use a free subdomain from services like [DuckDNS](https://www.duckdns.org/) or simply use the temporary `trycloudflare.com` URL (no account needed — see below).
-
-### Quick option (no account needed)
-
-```bash
-# Run while backend is running on port 3001:
-cloudflared tunnel --url http://localhost:3001
-```
-
-This prints a temporary HTTPS URL like `https://something.trycloudflare.com`. Works immediately, but the URL changes each restart.
-
-### Run as a permanent service
-
-```bash
-# Create config
-mkdir -p ~/.cloudflared
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: boiler
-credentials-file: /home/pi/.cloudflared/<your-tunnel-id>.json
-ingress:
-  - hostname: boiler.yourdomain.com
-    service: http://localhost:3001
-  - service: http_status:404
-EOF
-
-# Install as systemd service
 sudo cloudflared service install
-sudo systemctl start cloudflared
-sudo systemctl enable cloudflared
+sudo systemctl enable --now cloudflared
 ```
 
-Now `https://boiler.yourdomain.com` always points to your Pi.
+### Auto-start on boot
 
----
-
-## Step 5 — Auto-start on Pi reboot
-
-```bash
-# Create a systemd service for the backend
-sudo nano /etc/systemd/system/water-boiler.service
-```
-
-Paste:
+Create `/etc/systemd/system/water-boiler.service`:
 
 ```ini
 [Unit]
@@ -200,8 +138,8 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/water_switch_ui/backend
-ExecStart=/usr/bin/node src/server.js
+WorkingDirectory=/home/pi/water-switch-ui/backend
+ExecStart=/usr/bin/node dist/server.js
 Restart=on-failure
 RestartSec=5
 
@@ -209,36 +147,35 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Enable it:
-
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable water-boiler
-sudo systemctl start water-boiler
-sudo systemctl status water-boiler
+sudo systemctl enable --now water-boiler
 ```
 
 ---
 
 ## Troubleshooting
 
-### "Tuya API error [1010]" — token error
-- Double-check your Access ID and Secret in `.env`
-- Make sure the region matches where you created your cloud project
+| Problem                                    | Fix                                                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| Tuya API error [1010]                      | Check Access ID/Secret and region setting                                     |
+| Tuya API error [2017]                      | Verify Device ID; make sure SmartLife account is linked to your cloud project |
+| Toggle works in UI but switch doesn't move | Different DP code — check `rawDps` in `/api/status` response                  |
+| Schedules empty                            | Not all devices support the Tuya timer API                                    |
 
-### "Tuya API error [2017]" — device not found
-- Verify the Device ID in `.env`
-- Make sure the SmartLife account is linked to your cloud project (Step 1.4)
+---
 
-### Toggle works but nothing happens to the physical switch
-- The switch might use a different DP code. Check `rawDps` in the `/api/status` response:
-  ```bash
-  curl http://localhost:3001/api/status
-  ```
-- Look for the DP that changes when you manually toggle it in SmartLife. Update the `code` in `backend/src/routes/device.js` accordingly.
+## Tech stack
 
-### Schedules return empty
-- Not all device types support the Tuya timer API. If schedules fail, you can still use manual toggle and countdown.
+| Layer      | Tech                                                   |
+| ---------- | ------------------------------------------------------ |
+| Frontend   | React, TypeScript, Vite, CSS Modules                   |
+| Backend    | Node.js, Express                                       |
+| Auth       | Clerk (email + OAuth)                                  |
+| Device API | Custom Tuya Cloud client (HMAC-SHA256 signing, no SDK) |
+| Hosting    | Raspberry Pi + Cloudflare Tunnel                       |
+
+No database — all device state lives in Tuya, user/team data lives in Clerk metadata.
 
 ---
 
@@ -246,21 +183,23 @@ sudo systemctl status water-boiler
 
 ```
 water-switch-ui/
-├── backend/
-│   ├── src/
-│   │   ├── server.js          Express app
-│   │   ├── tuya.js            Tuya Cloud API client (no external deps)
-│   │   └── routes/
-│   │       ├── device.js      /api/status, /api/toggle
-│   │       └── schedule.js    /api/schedules, /api/countdown
-│   ├── .env                   Your credentials (never commit this)
-│   ├── .env.example           Template
-│   └── package.json
-└── frontend/
-    ├── src/
-    │   ├── App.tsx
-    │   ├── components/        All UI components
-    │   └── hooks/
-    │       └── useDeviceStatus.ts
-    └── package.json
+├── backend/src/
+│   ├── server.js              Express app
+│   ├── tuya.js                Tuya Cloud API client
+│   ├── sharing.js             Tuya Device Sharing (QR login)
+│   ├── events.js              SSE + background polling
+│   ├── actionTracker.js       UI action attribution
+│   ├── middleware/
+│   │   └── deviceConfig.js    Per-user Tuya client
+│   └── routes/
+│       ├── device.js          Status, toggle, history
+│       ├── schedule.js        Schedules, countdown
+│       ├── team.js            Household management
+│       └── setup.js           QR login + device setup
+└── frontend/src/
+    ├── App.tsx
+    ├── components/            Clock, status, toggle, timer, schedules,
+    │                          history, setup, household panel, invite modal
+    └── hooks/
+        └── useDeviceStatus.ts
 ```
