@@ -11,8 +11,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-backend
-  FRONTEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-frontend
+  FRONTEND_IMAGE: ${{ env.REGISTRY }}/eyaldassa/water-switch-ui-frontend
+  BACKEND_IMAGE: ${{ env.REGISTRY }}/eyaldassa/water-switch-ui-backend
 
 jobs:
   version:
@@ -56,10 +56,10 @@ jobs:
         include:
           - service: backend
             context: ./backend
-            image: ghcr.io/eyaldassa/water-switch-ui-backend
+            image: ${{ env.BACKEND_IMAGE }}
           - service: frontend
             context: ./frontend
-            image: ghcr.io/eyaldassa/water-switch-ui-frontend
+            image: ${{ env.FRONTEND_IMAGE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
         uses: fjogeleit/yaml-update-action@main
         with:
           token: ${{ secrets.BOILER_PAT_TOKEN }}
-          branch: master
+          branch: ${{ github.ref_name }}
           message: "release: v${{ needs.version.outputs.version }} [skip ci]"
           changes: |
             {
