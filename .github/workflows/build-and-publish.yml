@@ -11,8 +11,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  FRONTEND_IMAGE: ${{ env.REGISTRY }}/eyaldassa/water-switch-ui-frontend
-  BACKEND_IMAGE: ${{ env.REGISTRY }}/eyaldassa/water-switch-ui-backend
+  FRONTEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-frontend
+  BACKEND_IMAGE: ghcr.io/eyaldassa/water-switch-ui-backend
 
 jobs:
   version:
