@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { createClerkClient } from "@clerk/express";
+import { defaultClient as tuya } from "../tuya.js";
 
 const router = Router();
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -180,7 +181,7 @@ router.post("/team/accept-invite", safe(async (req, res) => {
   }
 
   if (invite.adminUserId === userId) {
-    return res.status(400).json({ error: "You can't join your own team" });
+    return res.status(400).json({ error: "You can't join your own household" });
   }
 
   // Set member's publicMetadata (replaces invitedBy with full member config)
@@ -284,6 +285,7 @@ router.get("/team/info", safe(async (req, res) => {
     return res.json({
       configured: true,
       role,
+      deviceName: pub.deviceName || null,
       team: enriched,
       pendingEmailInvites: pendingEmailCount,
     });
@@ -336,6 +338,57 @@ router.get("/team/info", safe(async (req, res) => {
   } catch {
     res.json({ configured: true, role, canInvite: pub.canInvite || false });
   }
+}));
+
+// ── PUT /api/team/device-name ────────────────────────────────────────────────
+router.put("/team/device-name", safe(async (req, res) => {
+  const { userId } = getAuth(req);
+  const pub = await getUserPub(userId);
+
+  if (!isAdmin(pub)) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+
+  const { deviceName } = req.body;
+  if (!deviceName || typeof deviceName !== "string" || !deviceName.trim()) {
+    return res.status(400).json({ error: "deviceName is required" });
+  }
+
+  const trimmed = deviceName.trim().slice(0, 50);
+
+  // Update on Tuya side
+  if (pub.deviceId) {
+    try {
+      await tuya.put(`/v1.0/devices/${pub.deviceId}`, { name: trimmed });
+      console.log(`[team] Tuya device ${pub.deviceId} renamed to "${trimmed}"`);
+    } catch (err) {
+      console.warn(`[team] Failed to rename on Tuya: ${err.message}`);
+    }
+  }
+
+  // Update admin's own metadata
+  const admin = await clerk.users.getUser(userId);
+  const adminPub = admin.publicMetadata || {};
+  await clerk.users.updateUserMetadata(userId, {
+    publicMetadata: { ...adminPub, deviceName: trimmed },
+  });
+
+  // Update all team members
+  const team = adminPub.team || [];
+  for (const member of team) {
+    try {
+      const u = await clerk.users.getUser(member.userId);
+      const uPub = u.publicMetadata || {};
+      await clerk.users.updateUserMetadata(member.userId, {
+        publicMetadata: { ...uPub, deviceName: trimmed },
+      });
+    } catch (err) {
+      console.error(`[team] Failed to update deviceName for member ${member.userId}:`, err.message);
+    }
+  }
+
+  console.log(`[team] Admin ${userId} updated deviceName to "${trimmed}"`);
+  res.json({ success: true, deviceName: trimmed });
 }));
 
 // ── GET /api/team/members ───────────────────────────────────────────────────
@@ -447,7 +500,7 @@ router.post("/team/leave", safe(async (req, res) => {
   const pub = await getUserPub(userId);
 
   if (pub?.role !== "member" || !pub?.adminUserId) {
-    return res.status(400).json({ error: "You are not a team member" });
+    return res.status(400).json({ error: "You are not a household member" });
   }
 
   // Remove from admin's team list

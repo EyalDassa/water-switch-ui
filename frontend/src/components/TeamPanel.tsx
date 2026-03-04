@@ -27,6 +27,9 @@ interface Props {
 export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
   const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
 
   const fetchTeamInfo = useCallback(async () => {
     try {
@@ -76,7 +79,7 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
   }
 
   async function leaveTeam() {
-    if (!confirm("Leave this team? You'll lose access to the device.")) return;
+    if (!confirm("Leave this household? You'll lose access to the device.")) return;
     setError(null);
     try {
       const res = await fetch("/api/team/leave", { method: "POST" });
@@ -90,7 +93,32 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
     }
   }
 
+  async function saveDeviceName() {
+    if (!nameInput.trim()) return;
+    setNameSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/team/device-name", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceName: nameInput.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to update name");
+      }
+      setEditingName(false);
+      fetchTeamInfo();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
   if (!teamInfo) return null;
+
+  const displayName = teamInfo.deviceName || "Household";
 
   // Member view
   if (role === "member") {
@@ -98,7 +126,7 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
     return (
       <div className={styles.card}>
         <div className={styles.header}>
-          <span className={styles.label}>Team</span>
+          <span className={styles.label}>{displayName}</span>
           {canInvite && (
             <button className={styles.inviteButton} onClick={onShowInvite}>
               + Invite
@@ -130,7 +158,7 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
         )}
 
         <button className={styles.leaveButton} onClick={leaveTeam}>
-          Leave Team
+          Leave Household
         </button>
         {error && <p className={styles.error}>{error}</p>}
       </div>
@@ -143,8 +171,48 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <span className={styles.label}>Team</span>
-        {canInvite && (
+        {editingName ? (
+          <div className={styles.nameEdit}>
+            <input
+              className={styles.nameInput}
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveDeviceName();
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              disabled={nameSaving}
+              autoFocus
+              maxLength={50}
+            />
+            <button
+              className={styles.nameConfirm}
+              onClick={saveDeviceName}
+              disabled={nameSaving || !nameInput.trim()}
+            >
+              {nameSaving ? "..." : "Save"}
+            </button>
+            <button
+              className={styles.nameCancel}
+              onClick={() => setEditingName(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <span
+            className={`${styles.label} ${styles.labelEditable}`}
+            onClick={() => {
+              setNameInput(teamInfo.deviceName || "");
+              setEditingName(true);
+            }}
+            title="Click to rename"
+          >
+            {displayName}
+            <span className={styles.editIcon}>&#9998;</span>
+          </span>
+        )}
+        {!editingName && canInvite && (
           <button className={styles.inviteButton} onClick={onShowInvite}>
             + Invite
           </button>
@@ -152,7 +220,7 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
       </div>
 
       {team.length === 0 ? (
-        <p className={styles.empty}>No team members yet</p>
+        <p className={styles.empty}>No members yet</p>
       ) : (
         <div className={styles.memberList}>
           {team.map((member) => (
@@ -177,7 +245,7 @@ export function TeamPanel({ role, canInvite, onShowInvite }: Props) {
                   onClick={() => toggleCanInvite(member.userId, member.canInvite)}
                   title={member.canInvite ? "Revoke invite permission" : "Allow inviting"}
                 >
-                  {member.canInvite ? "🔓" : "🔒"}
+                  {member.canInvite ? "\uD83D\uDD13" : "\uD83D\uDD12"}
                 </button>
                 <button
                   className={`${styles.actionButton} ${styles.removeButton}`}
