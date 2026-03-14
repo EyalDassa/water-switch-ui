@@ -10,7 +10,8 @@ export type RunSource =
   | "quick_timer"
   | "quick_timer_external"
   | "manual"
-  | "external";
+  | "external"
+  | "blocked";
 
 export interface HistoryRun {
   startTime: string;       // "HH:MM"
