@@ -14,6 +14,7 @@ import { HistoryCard } from "./components/HistoryCard";
 import { DeviceSetup } from "./components/DeviceSetup";
 import { TeamPanel } from "./components/TeamPanel";
 import { InviteModal } from "./components/InviteModal";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { setScheduleColorIndex } from "./scheduleColors";
 import styles from "./App.module.css";
 
@@ -190,6 +191,7 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
               canInvite={canInvite}
               onShowInvite={() => setShowInvite(true)}
             />
+            <SettingsPanel />
           </div>
         </div>
       </main>

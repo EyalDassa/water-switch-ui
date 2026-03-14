@@ -32,6 +32,21 @@ export function recordAction(deviceId, type, action, userId = null) {
  * @param {string} action - "on" or "off"
  * @returns {{ type: "toggle"|"countdown", userId: string|null } | null}
  */
+/**
+ * Check if we recently toggled a device (for activation guard).
+ * Uses a wider window than findOurAction since polling may detect
+ * the change up to 60-120s after we sent the command.
+ */
+export function wasRecentlyToggledByUs(deviceId, action = "on", windowMs = 120_000) {
+  const now = Date.now();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (now - e.timestamp > windowMs) break;
+    if (e.deviceId === deviceId && e.action === action) return true;
+  }
+  return false;
+}
+
 export function findOurAction(deviceId, eventTimestamp, action) {
   const WINDOW_MS = 10_000;
   for (let i = entries.length - 1; i >= 0; i--) {

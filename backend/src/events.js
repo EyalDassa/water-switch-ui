@@ -6,6 +6,11 @@
  * - Stops polling when all clients for a device disconnect
  */
 
+import { isGuardEnabled, startGuard, refreshSchedules as refreshGuardSchedules } from "./activationGuard.js";
+import { createClerkClient } from "@clerk/express";
+
+const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
+
 // ── Per-device client registry ──────────────────────────────────────────────
 // Map<deviceId, { clients: Set<res>, tuyaClient: TuyaClient, cachedStatus, pollInterval }>
 const deviceGroups = new Map();
@@ -117,6 +122,8 @@ export async function notifyStatusChange(deviceId, tuyaClient) {
 /** Call after schedule CRUD — tells connected frontends for this device to re-fetch */
 export function notifySchedulesChanged(deviceId) {
   broadcastToDevice(deviceId, "schedules-changed", {});
+  // Keep guard schedule cache in sync
+  refreshGuardSchedules(deviceId);
 }
 
 // ── SSE endpoint handler ────────────────────────────────────────────────────
@@ -141,12 +148,34 @@ export function sseHandler(req, res) {
   group.clients.add(res);
   startPollingDevice(deviceId);
 
+  // Initialize activation guard if the admin has it enabled
+  if (!isGuardEnabled(deviceId)) {
+    initGuardIfEnabled(deviceId, req.deviceConfig);
+  }
+
   req.on("close", () => {
     group.clients.delete(res);
     if (group.clients.size === 0) {
       stopPollingDevice(deviceId);
     }
   });
+}
+
+// ── Guard initialization ───────────────────────────────────────────────────
+
+async function initGuardIfEnabled(deviceId, deviceConfig) {
+  try {
+    const adminUserId = deviceConfig?.adminUserId || deviceConfig?.userId;
+    if (!adminUserId) return;
+
+    const admin = await clerk.users.getUser(adminUserId);
+    const settings = admin.publicMetadata?.settings;
+    if (settings?.blockExternalActivations) {
+      startGuard(deviceId, adminUserId);
+    }
+  } catch (err) {
+    console.warn("[sse] Failed to check guard setting:", err.message);
+  }
 }
 
 // ── Background poll (no-op in per-device mode) ──────────────────────────────

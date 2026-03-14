@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getAuth } from "@clerk/express";
 import { createClerkClient } from "@clerk/express";
 import { defaultClient as tuya } from "../tuya.js";
+import { startGuard, stopGuard } from "../activationGuard.js";
 
 const router = Router();
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -590,6 +591,71 @@ router.post(
       `[team] Member ${userId} left team of admin ${pub.adminUserId}`,
     );
     res.json({ success: true });
+  }),
+);
+
+// ── GET /api/settings ──────────────────────────────────────────────────────
+router.get(
+  "/settings",
+  safe(async (req, res) => {
+    const { userId } = getAuth(req);
+    const pub = await getUserPub(userId);
+    const adminUserId = getAdminUserId(pub, userId);
+    if (!adminUserId) {
+      return res.json({ blockExternalActivations: false });
+    }
+
+    const adminPub =
+      adminUserId === userId
+        ? pub
+        : (await clerk.users.getUser(adminUserId)).publicMetadata || {};
+
+    const settings = adminPub.settings || {};
+    res.json({
+      blockExternalActivations: !!settings.blockExternalActivations,
+      isAdmin: isAdmin(pub),
+    });
+  }),
+);
+
+// ── PUT /api/settings ──────────────────────────────────────────────────────
+router.put(
+  "/settings",
+  safe(async (req, res) => {
+    const { userId } = getAuth(req);
+    const pub = await getUserPub(userId);
+
+    if (!isAdmin(pub)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { blockExternalActivations } = req.body;
+    if (typeof blockExternalActivations !== "boolean") {
+      return res
+        .status(400)
+        .json({ error: "blockExternalActivations (boolean) is required" });
+    }
+
+    // Update admin metadata
+    const admin = await clerk.users.getUser(userId);
+    const adminPub = admin.publicMetadata || {};
+    const settings = { ...(adminPub.settings || {}), blockExternalActivations };
+    await clerk.users.updateUserMetadata(userId, {
+      publicMetadata: { ...adminPub, settings },
+    });
+
+    // Start or stop the activation guard
+    const deviceId = pub.deviceId || process.env.DEVICE_ID;
+    if (blockExternalActivations) {
+      startGuard(deviceId, userId);
+    } else {
+      stopGuard(deviceId);
+    }
+
+    console.log(
+      `[settings] blockExternalActivations=${blockExternalActivations} for device ${deviceId?.slice(0, 8)}...`,
+    );
+    res.json({ success: true, blockExternalActivations });
   }),
 );
 
