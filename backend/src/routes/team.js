@@ -613,6 +613,7 @@ router.get(
     const settings = adminPub.settings || {};
     res.json({
       blockExternalActivations: !!settings.blockExternalActivations,
+      blockAfterOneHour: !!settings.blockAfterOneHour,
       isAdmin: isAdmin(pub),
     });
   }),
@@ -629,33 +630,54 @@ router.put(
       return res.status(403).json({ error: "Admin access required" });
     }
 
-    const { blockExternalActivations } = req.body;
-    if (typeof blockExternalActivations !== "boolean") {
-      return res
-        .status(400)
-        .json({ error: "blockExternalActivations (boolean) is required" });
+    const { blockExternalActivations, blockAfterOneHour } = req.body;
+
+    // At least one setting must be provided
+    if (
+      typeof blockExternalActivations !== "boolean" &&
+      typeof blockAfterOneHour !== "boolean"
+    ) {
+      return res.status(400).json({ error: "No valid settings provided" });
     }
 
     // Update admin metadata
     const admin = await clerk.users.getUser(userId);
     const adminPub = admin.publicMetadata || {};
-    const settings = { ...(adminPub.settings || {}), blockExternalActivations };
+    const settings = { ...(adminPub.settings || {}) };
+
+    if (typeof blockExternalActivations === "boolean") {
+      settings.blockExternalActivations = blockExternalActivations;
+      // If blocking all, disable the delayed option
+      if (blockExternalActivations) settings.blockAfterOneHour = false;
+    }
+    if (typeof blockAfterOneHour === "boolean") {
+      settings.blockAfterOneHour = blockAfterOneHour;
+      // If enabling delayed, disable immediate block
+      if (blockAfterOneHour) settings.blockExternalActivations = false;
+    }
+
     await clerk.users.updateUserMetadata(userId, {
       publicMetadata: { ...adminPub, settings },
     });
 
     // Start or stop the activation guard
     const deviceId = pub.deviceId || process.env.DEVICE_ID;
-    if (blockExternalActivations) {
-      startGuard(deviceId, userId);
+    if (settings.blockExternalActivations) {
+      startGuard(deviceId, userId, "immediate");
+    } else if (settings.blockAfterOneHour) {
+      startGuard(deviceId, userId, "delayed");
     } else {
       stopGuard(deviceId);
     }
 
     console.log(
-      `[settings] blockExternalActivations=${blockExternalActivations} for device ${deviceId?.slice(0, 8)}...`,
+      `[settings] blockExternalActivations=${settings.blockExternalActivations}, blockAfterOneHour=${settings.blockAfterOneHour} for device ${deviceId?.slice(0, 8)}...`,
     );
-    res.json({ success: true, blockExternalActivations });
+    res.json({
+      success: true,
+      blockExternalActivations: settings.blockExternalActivations,
+      blockAfterOneHour: settings.blockAfterOneHour,
+    });
   }),
 );
 

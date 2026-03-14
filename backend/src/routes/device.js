@@ -293,17 +293,19 @@ function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTim
       const durationSec = Math.round((event.event_time - onEvent.event_time) / 1000);
 
       const onClassification = classifyEvent(onEvent, deviceId);
+      const offClassification = classifyEvent(event, deviceId);
       const hasCountdown = countdownEvents.some(
         (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
       );
       const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+      const wasBlocked = offClassification.type === "guard";
 
       allRuns.push({
         startTime: fmtHHMM(startDate),
         endTime: fmtHHMM(new Date(event.event_time)),
         date: fmtDate(startDate),
         durationSec,
-        source: determineRunSource(onClassification.type, hasCountdown, isScheduled),
+        source: wasBlocked ? "blocked" : determineRunSource(onClassification.type, hasCountdown, isScheduled),
         userId: onClassification.userId,
       });
       onEvent = null;

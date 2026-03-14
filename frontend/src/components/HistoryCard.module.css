@@ -88,3 +88,11 @@
   color: var(--text-muted);
   margin-left: auto;
 }
+
+.runBlocked {
+  opacity: 0.7;
+}
+
+.dotBlocked {
+  background: #ef4444;
+}

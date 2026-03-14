@@ -171,7 +171,9 @@ async function initGuardIfEnabled(deviceId, deviceConfig) {
     const admin = await clerk.users.getUser(adminUserId);
     const settings = admin.publicMetadata?.settings;
     if (settings?.blockExternalActivations) {
-      startGuard(deviceId, adminUserId);
+      startGuard(deviceId, adminUserId, "immediate");
+    } else if (settings?.blockAfterOneHour) {
+      startGuard(deviceId, adminUserId, "delayed");
     }
   } catch (err) {
     console.warn("[sse] Failed to check guard setting:", err.message);

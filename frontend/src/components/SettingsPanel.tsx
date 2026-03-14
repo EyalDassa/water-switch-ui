@@ -3,11 +3,13 @@ import styles from "./SettingsPanel.module.css";
 
 interface Settings {
   blockExternalActivations: boolean;
+  blockAfterOneHour: boolean;
   isAdmin: boolean;
 }
 
 export function SettingsPanel() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,22 +27,26 @@ export function SettingsPanel() {
     fetchSettings();
   }, [fetchSettings]);
 
-  async function toggleBlock() {
+  async function updateSetting(patch: Partial<Settings>) {
     if (!settings || saving) return;
     setSaving(true);
     setError(null);
-    const newValue = !settings.blockExternalActivations;
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blockExternalActivations: newValue }),
+        body: JSON.stringify(patch),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to update");
       }
-      setSettings({ ...settings, blockExternalActivations: newValue });
+      const data = await res.json();
+      setSettings({
+        ...settings,
+        blockExternalActivations: data.blockExternalActivations,
+        blockAfterOneHour: data.blockAfterOneHour,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
     } finally {
@@ -52,27 +58,80 @@ export function SettingsPanel() {
 
   return (
     <div className={styles.card}>
-      <span className={styles.label}>Settings</span>
+      <button
+        className={styles.headerButton}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={styles.label}>Settings</span>
+        <span className={`${styles.chevron} ${expanded ? styles.chevronOpen : ""}`}>
+          &#9662;
+        </span>
+      </button>
 
-      <div className={styles.settingRow}>
-        <div className={styles.settingInfo}>
-          <span className={styles.settingName}>Block external activations</span>
-          <span className={styles.settingDesc}>
-            Auto-turn-off the device if it's activated externally (power spike,
-            SmartLife, etc). Scheduled activations are not affected.
-          </span>
+      {expanded && (
+        <div className={styles.content}>
+          <div className={styles.settingRow}>
+            <div className={styles.settingInfo}>
+              <span className={styles.settingName}>
+                Block all external activations
+              </span>
+              <span className={styles.settingDesc}>
+                Immediately turn off the device if activated externally (power
+                spike, SmartLife, physical button). Schedules are not affected.
+              </span>
+            </div>
+            <button
+              className={`${styles.toggle} ${settings.blockExternalActivations ? styles.toggleOn : ""}`}
+              onClick={() =>
+                updateSetting({
+                  blockExternalActivations: !settings.blockExternalActivations,
+                })
+              }
+              disabled={saving || !settings.isAdmin}
+              title={!settings.isAdmin ? "Only the admin can change this" : ""}
+            >
+              <span className={styles.toggleKnob} />
+            </button>
+          </div>
+
+          <div className={styles.settingRow}>
+            <div className={styles.settingInfo}>
+              <span className={styles.settingName}>
+                Block external activations after 1 hour
+              </span>
+              <span className={styles.settingDesc}>
+                Allow external activations (quick timers, SmartLife) but
+                automatically turn off after 1 hour to prevent unattended long
+                runs.
+              </span>
+            </div>
+            <button
+              className={`${styles.toggle} ${settings.blockAfterOneHour ? styles.toggleOn : ""}`}
+              onClick={() =>
+                updateSetting({
+                  blockAfterOneHour: !settings.blockAfterOneHour,
+                })
+              }
+              disabled={
+                saving ||
+                !settings.isAdmin ||
+                settings.blockExternalActivations
+              }
+              title={
+                !settings.isAdmin
+                  ? "Only the admin can change this"
+                  : settings.blockExternalActivations
+                    ? "Disable 'Block all' first to use this option"
+                    : ""
+              }
+            >
+              <span className={styles.toggleKnob} />
+            </button>
+          </div>
+
+          {error && <p className={styles.error}>{error}</p>}
         </div>
-        <button
-          className={`${styles.toggle} ${settings.blockExternalActivations ? styles.toggleOn : ""}`}
-          onClick={toggleBlock}
-          disabled={saving || !settings.isAdmin}
-          title={!settings.isAdmin ? "Only the admin can change this" : ""}
-        >
-          <span className={styles.toggleKnob} />
-        </button>
-      </div>
-
-      {error && <p className={styles.error}>{error}</p>}
+      )}
     </div>
   );
 }

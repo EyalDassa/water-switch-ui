@@ -7,6 +7,7 @@ const SOURCE_LABELS: Record<string, { text: string; color: string }> = {
   quick_timer_external: { text: "Timer (External)",   color: "#f97316" },
   manual:               { text: "Manual (UI)",        color: "#3b82f6" },
   external:             { text: "Manual (External)",  color: "#64748b" },
+  blocked:              { text: "Blocked by Guard",   color: "#ef4444" },
 };
 
 interface Props {
@@ -71,8 +72,8 @@ export function HistoryCard({ runs }: Props) {
                   <span className={styles.dayTotal}>{formatDuration(dayTotals.get(run.date)!)}</span>
                 </div>
               )}
-              <div className={styles.run}>
-                <span className={styles.dot} />
+              <div className={`${styles.run} ${run.source === "blocked" ? styles.runBlocked : ""}`}>
+                <span className={`${styles.dot} ${run.source === "blocked" ? styles.dotBlocked : ""}`} />
                 <span className={styles.time}>
                   {run.startTime} – {run.endTime ?? "now"}
                 </span>

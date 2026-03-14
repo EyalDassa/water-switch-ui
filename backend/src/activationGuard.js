@@ -7,13 +7,14 @@
  */
 
 import { defaultClient as tuya } from "./tuya.js";
-import { wasRecentlyToggledByUs } from "./actionTracker.js";
+import { wasRecentlyToggledByUs, recordAction } from "./actionTracker.js";
 import { createClerkClient } from "@clerk/express";
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 // ── In-memory state ────────────────────────────────────────────────────────
-// deviceId → { adminUserId, scheduleTimes, pollInterval, lastKnownOn }
+// deviceId → { mode, adminUserId, scheduleTimes, pollInterval, lastKnownOn, onSince }
+// mode: "immediate" = block all external, "delayed" = block after 1h30s
 const guardedDevices = new Map();
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -30,13 +31,20 @@ export function isGuardEnabled(deviceId) {
   return guardedDevices.has(deviceId);
 }
 
-export function startGuard(deviceId, adminUserId) {
-  if (guardedDevices.has(deviceId)) return;
+export function startGuard(deviceId, adminUserId, mode = "immediate") {
+  const existing = guardedDevices.get(deviceId);
+  if (existing) {
+    // Update mode without restarting polling
+    existing.mode = mode;
+    return;
+  }
 
   const guard = {
+    mode,
     adminUserId,
     scheduleTimes: [],
     lastKnownOn: false,
+    onSince: null, // timestamp when external ON was first detected
     pollInterval: setInterval(() => guardPoll(deviceId), 10_000),
   };
   guardedDevices.set(deviceId, guard);
@@ -82,6 +90,8 @@ export async function refreshSchedules(deviceId) {
 
 // ── Internal ───────────────────────────────────────────────────────────────
 
+const DELAYED_BLOCK_MS = (60 * 60 + 30) * 1000; // 1 hour 30 seconds
+
 async function guardPoll(deviceId) {
   const guard = guardedDevices.get(deviceId);
   if (!guard) return;
@@ -96,21 +106,52 @@ async function guardPoll(deviceId) {
     const wasOff = !guard.lastKnownOn;
     guard.lastKnownOn = isOn;
 
-    // Only act on OFF → ON transitions
-    if (!isOn || !wasOff) return;
+    if (!isOn) {
+      guard.onSince = null;
+      return;
+    }
 
     // Was it triggered by our API?
-    if (wasRecentlyToggledByUs(deviceId, "on")) return;
+    if (wasRecentlyToggledByUs(deviceId, "on")) {
+      guard.onSince = null;
+      return;
+    }
 
     // Does it match a schedule?
-    if (matchesSchedule(Date.now(), guard.scheduleTimes)) return;
+    if (wasOff && matchesSchedule(Date.now(), guard.scheduleTimes)) {
+      guard.onSince = null;
+      return;
+    }
 
-    // External activation — block it
-    console.warn(`[guard] BLOCKING external activation on ${deviceId.slice(0, 8)}...`);
-    await turnOff(deviceId);
-    guard.lastKnownOn = false;
+    // ── Immediate mode: block on first detection ───────────────────────
+    if (guard.mode === "immediate" && wasOff) {
+      console.warn(`[guard] BLOCKING external activation on ${deviceId.slice(0, 8)}...`);
+      await turnOff(deviceId);
+      recordAction(deviceId, "guard", "off");
+      guard.lastKnownOn = false;
+      guard.onSince = null;
+      sendNotification(deviceId, guard);
+      return;
+    }
 
-    sendNotification(deviceId, guard);
+    // ── Delayed mode: block after 1h30s of uninterrupted external run ──
+    if (guard.mode === "delayed") {
+      if (wasOff) {
+        // New external ON — start tracking
+        guard.onSince = Date.now();
+        console.log(`[guard] External activation detected on ${deviceId.slice(0, 8)}..., will block after 1h`);
+        return;
+      }
+
+      if (guard.onSince && Date.now() - guard.onSince >= DELAYED_BLOCK_MS) {
+        console.warn(`[guard] BLOCKING external activation (exceeded 1h) on ${deviceId.slice(0, 8)}...`);
+        await turnOff(deviceId);
+        recordAction(deviceId, "guard", "off");
+        guard.lastKnownOn = false;
+        guard.onSince = null;
+        sendNotification(deviceId, guard);
+      }
+    }
   } catch (err) {
     console.error(`[guard] Poll error: ${err.message}`);
   }
