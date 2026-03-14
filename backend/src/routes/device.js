@@ -300,7 +300,7 @@ function findMidRunReactivations(onTime, offTime, countdownSetEvents, deviceId) 
     if (ce.event_time > onTime + MERGE_WINDOW && ce.event_time < offTime) {
       const alreadyTracked = reactivations.some((r) => Math.abs(r.timestamp - ce.event_time) < MERGE_WINDOW);
       if (!alreadyTracked) {
-        reactivations.push({ timestamp: ce.event_time, type: "countdown", userId: null });
+        reactivations.push({ timestamp: ce.event_time, type: "external", userId: null });
       }
     }
   }

@@ -91,7 +91,7 @@ function startPollingDevice(deviceId) {
   if (!group || group.pollInterval) return;
 
   pollDeviceStatus(deviceId);
-  group.pollInterval = setInterval(() => pollDeviceStatus(deviceId), 60_000);
+  group.pollInterval = setInterval(() => pollDeviceStatus(deviceId), 8_000);
   console.log(`[sse] Started polling device ${deviceId.slice(0, 8)}...`);
 }
 
