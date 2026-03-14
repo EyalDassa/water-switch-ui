@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createClerkClient } from "@clerk/express";
 import { notifyStatusChange } from "../events.js";
-import { recordAction, findOurAction } from "../actionTracker.js";
+import { recordAction, findOurAction, findActionsInRange } from "../actionTracker.js";
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -281,53 +281,138 @@ async function resolveUserNames(runs) {
   }
 }
 
-function buildRuns(switchEvents, countdownEvents, endTime, deviceId, scheduleTimes) {
+/**
+ * Find mid-run re-activations: someone started a new timer/toggle while device was already ON.
+ * Merges signals from our action tracker (has userId) and countdown set events (persisted in Tuya logs).
+ */
+function findMidRunReactivations(onTime, offTime, countdownSetEvents, deviceId) {
+  const reactivations = [];
+  const MERGE_WINDOW = 10_000; // 10s — same event from different sources
+
+  // From action tracker (has userId, type)
+  const trackerActions = findActionsInRange(deviceId, onTime + MERGE_WINDOW, offTime);
+  for (const a of trackerActions) {
+    reactivations.push({ timestamp: a.timestamp, type: a.type, userId: a.userId });
+  }
+
+  // From countdown set events (persisted in Tuya logs, survives restarts)
+  for (const ce of countdownSetEvents) {
+    if (ce.event_time > onTime + MERGE_WINDOW && ce.event_time < offTime) {
+      const alreadyTracked = reactivations.some((r) => Math.abs(r.timestamp - ce.event_time) < MERGE_WINDOW);
+      if (!alreadyTracked) {
+        reactivations.push({ timestamp: ce.event_time, type: "countdown", userId: null });
+      }
+    }
+  }
+
+  reactivations.sort((a, b) => a.timestamp - b.timestamp);
+  return reactivations;
+}
+
+function makeRun(startTime, endTime, endTimeIsNow, classification, hasCountdown, isScheduled, wasBlocked) {
+  const startDate = new Date(startTime);
+  const durationSec = Math.round((endTime - startTime) / 1000);
+  return {
+    startTime: fmtHHMM(startDate),
+    endTime: endTimeIsNow ? null : fmtHHMM(new Date(endTime)),
+    date: fmtDate(startDate),
+    durationSec,
+    source: wasBlocked ? "blocked" : determineRunSource(classification.type, hasCountdown, isScheduled),
+    userId: classification.userId,
+  };
+}
+
+function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes) {
   const allRuns = [];
   let onEvent = null;
 
   for (const event of switchEvents) {
     if (event.value === "true" || event.value === true) {
+      // Consecutive ON without OFF — close previous run at this ON's timestamp
+      if (onEvent) {
+        const onClass = classifyEvent(onEvent, deviceId);
+        const hasCd = countdownSetEvents.some(
+          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+        );
+        const isSched = onClass.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+        allRuns.push(makeRun(onEvent.event_time, event.event_time, false, onClass, hasCd, isSched, false));
+      }
       onEvent = event;
     } else if (onEvent) {
-      const startDate = new Date(onEvent.event_time);
-      const durationSec = Math.round((event.event_time - onEvent.event_time) / 1000);
+      // ON→OFF pair — check for mid-run re-activations to split
+      const reactivations = findMidRunReactivations(onEvent.event_time, event.event_time, countdownSetEvents, deviceId);
 
-      const onClassification = classifyEvent(onEvent, deviceId);
-      const offClassification = classifyEvent(event, deviceId);
-      const hasCountdown = countdownEvents.some(
-        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
-      );
-      const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
-      const wasBlocked = offClassification.type === "guard";
+      if (reactivations.length > 0) {
+        let segStart = onEvent.event_time;
+        let segClass = classifyEvent(onEvent, deviceId);
 
-      allRuns.push({
-        startTime: fmtHHMM(startDate),
-        endTime: fmtHHMM(new Date(event.event_time)),
-        date: fmtDate(startDate),
-        durationSec,
-        source: wasBlocked ? "blocked" : determineRunSource(onClassification.type, hasCountdown, isScheduled),
-        userId: onClassification.userId,
-      });
+        for (const react of reactivations) {
+          const hasCd = countdownSetEvents.some(
+            (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+          );
+          const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
+          allRuns.push(makeRun(segStart, react.timestamp, false, segClass, hasCd, isSched, false));
+
+          segStart = react.timestamp;
+          segClass = { type: react.type, userId: react.userId };
+        }
+
+        // Final segment: last reactivation → OFF
+        const offClassification = classifyEvent(event, deviceId);
+        const hasCd = countdownSetEvents.some(
+          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+        );
+        const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
+        const wasBlocked = offClassification.type === "guard";
+        allRuns.push(makeRun(segStart, event.event_time, false, segClass, hasCd, isSched, wasBlocked));
+      } else {
+        // Normal single run
+        const onClassification = classifyEvent(onEvent, deviceId);
+        const offClassification = classifyEvent(event, deviceId);
+        const hasCountdown = countdownSetEvents.some(
+          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+        );
+        const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+        const wasBlocked = offClassification.type === "guard";
+        allRuns.push(makeRun(onEvent.event_time, event.event_time, false, onClassification, hasCountdown, isScheduled, wasBlocked));
+      }
       onEvent = null;
     }
   }
 
+  // Still-running (no OFF yet)
   if (onEvent) {
-    const startDate = new Date(onEvent.event_time);
-    const durationSec = Math.round((endTime - onEvent.event_time) / 1000);
-    const onClassification = classifyEvent(onEvent, deviceId);
-    const hasCountdown = countdownEvents.some(
-      (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
-    );
-    const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
-    allRuns.push({
-      startTime: fmtHHMM(startDate),
-      endTime: null,
-      date: fmtDate(startDate),
-      durationSec,
-      source: determineRunSource(onClassification.type, hasCountdown, isScheduled),
-      userId: onClassification.userId,
-    });
+    const reactivations = findMidRunReactivations(onEvent.event_time, endTime, countdownSetEvents, deviceId);
+
+    if (reactivations.length > 0) {
+      let segStart = onEvent.event_time;
+      let segClass = classifyEvent(onEvent, deviceId);
+
+      for (const react of reactivations) {
+        const hasCd = countdownSetEvents.some(
+          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+        );
+        const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
+        allRuns.push(makeRun(segStart, react.timestamp, false, segClass, hasCd, isSched, false));
+
+        segStart = react.timestamp;
+        segClass = { type: react.type, userId: react.userId };
+      }
+
+      // Final segment: still running
+      const hasCd = countdownSetEvents.some(
+        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+      );
+      const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
+      allRuns.push(makeRun(segStart, endTime, true, segClass, hasCd, isSched, false));
+    } else {
+      const onClassification = classifyEvent(onEvent, deviceId);
+      const hasCountdown = countdownSetEvents.some(
+        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+      );
+      const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+      allRuns.push(makeRun(onEvent.event_time, endTime, true, onClassification, hasCountdown, isScheduled, false));
+    }
   }
 
   return allRuns;

@@ -47,6 +47,19 @@ export function wasRecentlyToggledByUs(deviceId, action = "on", windowMs = 120_0
   return false;
 }
 
+/**
+ * Find all our "on" actions within a time range (for splitting overlapping runs).
+ */
+export function findActionsInRange(deviceId, startTime, endTime, action = "on") {
+  const results = [];
+  for (const e of entries) {
+    if (e.deviceId === deviceId && e.action === action && e.timestamp > startTime && e.timestamp < endTime) {
+      results.push(e);
+    }
+  }
+  return results;
+}
+
 export function findOurAction(deviceId, eventTimestamp, action) {
   const WINDOW_MS = 10_000;
   for (let i = entries.length - 1; i >= 0; i--) {
