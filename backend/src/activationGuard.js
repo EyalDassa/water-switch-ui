@@ -9,6 +9,9 @@
 import { defaultClient as tuya } from "./tuya.js";
 import { wasRecentlyToggledByUs, recordAction } from "./actionTracker.js";
 import { createClerkClient } from "@clerk/express";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("guard");
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -20,9 +23,9 @@ const guardedDevices = new Map();
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@parligator.com";
 if (RESEND_API_KEY) {
-  console.log("[guard] Resend configured — email notifications enabled");
+  log.info("Resend configured — email notifications enabled");
 } else {
-  console.log("[guard] No RESEND_API_KEY — email notifications disabled");
+  log.info("No RESEND_API_KEY — email notifications disabled");
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -52,7 +55,7 @@ export function startGuard(deviceId, adminUserId, mode = "immediate") {
   // Seed current state + schedules
   guardPoll(deviceId);
   refreshSchedules(deviceId);
-  console.log(`[guard] Started for device ${deviceId.slice(0, 8)}...`);
+  log.info(`Started for device ${deviceId.slice(0, 8)}… (mode: ${mode})`);
 }
 
 export function stopGuard(deviceId) {
@@ -60,7 +63,7 @@ export function stopGuard(deviceId) {
   if (!guard) return;
   clearInterval(guard.pollInterval);
   guardedDevices.delete(deviceId);
-  console.log(`[guard] Stopped for device ${deviceId.slice(0, 8)}...`);
+  log.info(`Stopped for device ${deviceId.slice(0, 8)}…`);
 }
 
 /** Re-cache schedule times (call after schedule CRUD) */
@@ -84,7 +87,7 @@ export async function refreshSchedules(deviceId) {
     }
     guard.scheduleTimes = times;
   } catch (err) {
-    console.warn("[guard] Failed to refresh schedules:", err.message);
+    log.warn(`Failed to refresh schedules: ${err.message}`);
   }
 }
 
@@ -125,7 +128,7 @@ async function guardPoll(deviceId) {
 
     // ── Immediate mode: block on first detection ───────────────────────
     if (guard.mode === "immediate" && wasOff) {
-      console.warn(`[guard] BLOCKING external activation on ${deviceId.slice(0, 8)}...`);
+      log.event(`BLOCKING external activation on ${deviceId.slice(0, 8)}… (immediate mode)`);
       await turnOff(deviceId);
       recordAction(deviceId, "guard", "off");
       guard.lastKnownOn = false;
@@ -139,12 +142,12 @@ async function guardPoll(deviceId) {
       if (wasOff) {
         // New external ON — start tracking
         guard.onSince = Date.now();
-        console.log(`[guard] External activation detected on ${deviceId.slice(0, 8)}..., will block after 1h`);
+        log.event(`External activation detected on ${deviceId.slice(0, 8)}…, will block after 1h`);
         return;
       }
 
       if (guard.onSince && Date.now() - guard.onSince >= DELAYED_BLOCK_MS) {
-        console.warn(`[guard] BLOCKING external activation (exceeded 1h) on ${deviceId.slice(0, 8)}...`);
+        log.event(`BLOCKING external activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
         await turnOff(deviceId);
         recordAction(deviceId, "guard", "off");
         guard.lastKnownOn = false;
@@ -153,7 +156,7 @@ async function guardPoll(deviceId) {
       }
     }
   } catch (err) {
-    console.error(`[guard] Poll error: ${err.message}`);
+    log.error(`Poll error: ${err.message}`);
   }
 }
 
@@ -199,9 +202,7 @@ async function sendNotification(deviceId, guard) {
       timeZone: "Asia/Jerusalem",
     });
 
-    console.log(
-      `[guard] Blocked external activation on "${deviceName}" at ${time}. Notifying: ${adminEmail || "(no email)"}`
-    );
+    log.event(`Blocked external activation on "${deviceName}" at ${time}. Notifying: ${adminEmail || "(no email)"}`);
 
     if (!RESEND_API_KEY || !adminEmail) return;
 
@@ -229,9 +230,9 @@ async function sendNotification(deviceId, guard) {
 
     if (!res.ok) {
       const err = await res.text();
-      console.warn("[guard] Resend API error:", err);
+      log.warn("Resend API error:", err);
     }
   } catch (err) {
-    console.warn("[guard] Notification error:", err.message);
+    log.warn(`Notification error: ${err.message}`);
   }
 }

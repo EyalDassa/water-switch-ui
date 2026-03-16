@@ -3,6 +3,9 @@ import { getAuth } from "@clerk/express";
 import { createClerkClient } from "@clerk/express";
 import { defaultClient as tuya } from "../tuya.js";
 import { startGuard, stopGuard } from "../activationGuard.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("team");
 
 const router = Router();
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -46,7 +49,7 @@ async function resolveInvite(user) {
     const admin = await clerk.users.getUser(pub.invitedBy);
     const adminPub = admin.publicMetadata || {};
     const email = user.emailAddresses?.[0]?.emailAddress?.toLowerCase();
-    console.log(`[team] Resolved invite for ${email} → admin ${pub.invitedBy}`);
+    log.info(` Resolved invite for ${email} → admin ${pub.invitedBy}`);
     return {
       adminUserId: pub.invitedBy,
       deviceId: adminPub.deviceId,
@@ -106,7 +109,7 @@ router.post(
         privateMetadata: { ...priv, pendingEmailInvites: pending },
       });
     } catch (err) {
-      console.error("[team] Failed to persist email invite:", err.message);
+      log.error(" Failed to persist email invite:", err.message);
     }
 
     // If the invited user already has a Clerk account, set invitedBy directly
@@ -125,13 +128,13 @@ router.post(
               deviceName: deviceInfo.deviceName,
             },
           });
-          console.log(
+          log.info(
             `[team] Set invitedBy on existing user ${normalizedEmail}`,
           );
         }
       }
     } catch (err) {
-      console.log(
+      log.info(
         `[team] Could not set invitedBy on existing user: ${err.message}`,
       );
     }
@@ -150,11 +153,11 @@ router.post(
           deviceName: deviceInfo.deviceName,
         },
       });
-      console.log(
+      log.info(
         `[team] Clerk invitation sent to ${normalizedEmail}, id=${invitation.id}, status=${invitation.status}`,
       );
     } catch (err) {
-      console.log(`[team] Clerk invitation API note: ${err.message}`);
+      log.info(` Clerk invitation API note: ${err.message}`);
     }
 
     return res.json({ success: true });
@@ -239,7 +242,7 @@ router.post(
       privateMetadata: { ...adminPriv, pendingEmailInvites: remaining },
     });
 
-    console.log(
+    log.info(
       `[team] User ${userId} (${email}) accepted invite from admin ${invite.adminUserId}`,
     );
     res.json({ success: true, deviceName: invite.deviceName });
@@ -279,7 +282,7 @@ router.get(
                 canInvite: uPub.canInvite || false,
               });
               synced = true;
-              console.log(
+              log.info(
                 `[team] Auto-synced missing member ${u.id} (${email}) into admin's team`,
               );
             }
@@ -291,7 +294,7 @@ router.get(
           });
         }
       } catch (err) {
-        console.error("[team] Reconciliation check failed:", err.message);
+        log.error(" Reconciliation check failed:", err.message);
       }
 
       // Enrich team list with display names
@@ -402,11 +405,11 @@ router.put(
     if (pub.deviceId) {
       try {
         await tuya.put(`/v1.0/devices/${pub.deviceId}`, { name: trimmed });
-        console.log(
+        log.info(
           `[team] Tuya device ${pub.deviceId} renamed to "${trimmed}"`,
         );
       } catch (err) {
-        console.warn(`[team] Failed to rename on Tuya: ${err.message}`);
+        log.warn(` Failed to rename on Tuya: ${err.message}`);
       }
     }
 
@@ -427,14 +430,13 @@ router.put(
           publicMetadata: { ...uPub, deviceName: trimmed },
         });
       } catch (err) {
-        console.error(
-          `[team] Failed to update deviceName for member ${member.userId}:`,
-          err.message,
+        log.error(
+          `Failed to update deviceName for member ${member.userId}: ${err.message}`,
         );
       }
     }
 
-    console.log(`[team] Admin ${userId} updated deviceName to "${trimmed}"`);
+    log.info(` Admin ${userId} updated deviceName to "${trimmed}"`);
     res.json({ success: true, deviceName: trimmed });
   }),
 );
@@ -507,7 +509,7 @@ router.delete(
       },
     });
 
-    console.log(`[team] Admin ${userId} removed member ${memberId}`);
+    log.info(` Admin ${userId} removed member ${memberId}`);
     res.json({ success: true });
   }),
 );
@@ -547,7 +549,7 @@ router.put(
       publicMetadata: { ...memberPub, canInvite: canInviteVal },
     });
 
-    console.log(
+    log.info(
       `[team] Updated permissions for ${memberId}: canInvite=${canInviteVal}`,
     );
     res.json({ success: true });
@@ -587,7 +589,7 @@ router.post(
       },
     });
 
-    console.log(
+    log.info(
       `[team] Member ${userId} left team of admin ${pub.adminUserId}`,
     );
     res.json({ success: true });
@@ -670,7 +672,7 @@ router.put(
       stopGuard(deviceId);
     }
 
-    console.log(
+    log.info(
       `[settings] blockExternalActivations=${settings.blockExternalActivations}, blockAfterOneHour=${settings.blockAfterOneHour} for device ${deviceId?.slice(0, 8)}...`,
     );
     res.json({
@@ -683,7 +685,7 @@ router.put(
 
 // ── Error handler for team routes ───────────────────────────────────────────
 router.use((err, req, res, _next) => {
-  console.error("[team] Unhandled error:", err.message);
+  log.error(" Unhandled error:", err.message);
   if (!res.headersSent) {
     res.status(500).json({ error: err.message || "Internal server error" });
   }

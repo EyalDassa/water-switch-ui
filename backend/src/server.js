@@ -1,11 +1,9 @@
-// ── Timestamp all console output ─────────────────────────────────────────────
-const _log = console.log, _warn = console.warn, _err = console.error;
-const ts = () => new Date().toISOString().replace("T", " ").slice(0, 23);
-console.log  = (...a) => _log(`[${ts()}]`, ...a);
-console.warn = (...a) => _warn(`[${ts()}]`, ...a);
-console.error = (...a) => _err(`[${ts()}]`, ...a);
-
 import "dotenv/config";
+import "./logger.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("http");
+
 import express from "express";
 import cors from "cors";
 import { join, dirname } from "path";
@@ -38,7 +36,7 @@ app.use((req, res, next) => {
     res.on("finish", () => {
       const auth = getAuth(req);
       const uid = auth?.userId ? auth.userId.slice(0, 8) + "..." : "anon";
-      console.log(`[http] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms [${uid}]`);
+      log.info(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms [${uid}]`);
     });
   }
   next();
@@ -74,7 +72,7 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Water Switch UI backend running on http://0.0.0.0:${PORT}`);
-  console.log(`API available at http://0.0.0.0:${PORT}/api`);
+  log.info(`Water Switch UI backend running on http://0.0.0.0:${PORT}`);
+  log.info(`API available at http://0.0.0.0:${PORT}/api`);
   startBackgroundPoll();
 });

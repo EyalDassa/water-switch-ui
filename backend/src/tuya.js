@@ -11,6 +11,15 @@
 
 import { createHmac, createHash } from "crypto";
 import "dotenv/config";
+import { createLogger, logPoll } from "./logger.js";
+
+const log = createLogger("tuya");
+
+// Paths that fire every poll cycle — only log when LOG_POLL=true
+const POLL_PATHS = ["/v1.0/iot-03/devices/", "/v1.0/devices/"];
+function isPollPath(path) {
+  return POLL_PATHS.some((p) => path.startsWith(p)) && !path.includes("/logs") && !path.includes("/commands");
+}
 
 const REGION_ENDPOINTS = {
   us: "https://openapi.tuyaus.com",
@@ -28,6 +37,7 @@ export class TuyaClient {
   #tokenExpiry = 0;
   #refreshToken = null;
   #onTokenRefresh = null;
+  #tokenPromise = null;
 
   /**
    * @param {object} opts
@@ -59,24 +69,36 @@ export class TuyaClient {
   async #getToken() {
     if (this.#cachedToken && Date.now() < this.#tokenExpiry) return this.#cachedToken;
 
+    // Deduplicate concurrent token requests
+    if (this.#tokenPromise) return this.#tokenPromise;
+
+    this.#tokenPromise = this.#fetchToken();
+    try {
+      return await this.#tokenPromise;
+    } finally {
+      this.#tokenPromise = null;
+    }
+  }
+
+  async #fetchToken() {
     if (this.#refreshToken) {
       // User mode: refresh using refresh_token
-      console.log("[tuya] Refreshing user token...");
+      log.info("Refreshing user token...");
       const result = await this.#signedRequest("GET", `/v1.0/token/${this.#refreshToken}`, null, true);
       this.#cachedToken = result.access_token;
       this.#refreshToken = result.refresh_token;
       this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
       this.#onTokenRefresh?.(result.access_token, result.refresh_token);
-      console.log(`[tuya] User token refreshed, expires in ${result.expire_time}s`);
+      log.info(`User token refreshed, expires in ${result.expire_time}s`);
       return this.#cachedToken;
     }
 
     // Simple mode: fetch new project token
-    console.log("[tuya] Fetching new access token...");
+    log.info("Fetching new access token...");
     const result = await this.#signedRequest("GET", "/v1.0/token?grant_type=1", null, true);
     this.#cachedToken = result.access_token;
     this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
-    console.log(`[tuya] Token obtained, expires in ${result.expire_time}s`);
+    log.info(`Token obtained, expires in ${result.expire_time}s`);
     return this.#cachedToken;
   }
 
@@ -120,30 +142,31 @@ export class TuyaClient {
     if (body) options.body = JSON.stringify(body);
 
     const url = `${this.#baseUrl}${path}`;
-    console.log(`[tuya] ${method} ${path}`);
+    const isPoll = isPollPath(path);
+    if (!isPoll || logPoll) log.debug(`${method} ${path}`);
 
     let res;
     try {
       res = await fetch(url, options);
     } catch (err) {
       const detail = err.cause ? JSON.stringify(err.cause) : err.message;
-      console.error(`[tuya] FETCH ERROR ${method} ${path}: ${detail}`);
+      log.error(`FETCH ERROR ${method} ${path}: ${detail}`);
       throw new Error(`Tuya fetch failed for ${url}: ${detail}`);
     }
     const data = await res.json();
 
     if (!data.success && data.code === 501 && _retry < 1) {
-      console.warn(`[tuya] 501 transient error on ${path}, retrying...`);
+      log.warn(`501 transient error on ${path}, retrying...`);
       await new Promise((r) => setTimeout(r, 1000));
       return this.#signedRequest(method, path, body, isTokenRequest, _retry + 1);
     }
 
     if (!data.success) {
-      console.error(`[tuya] API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
+      log.error(`API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
       throw new Error(`Tuya API error [${data.code}]: ${data.msg || JSON.stringify(data)}`);
     }
 
-    console.log(`[tuya] ${method} ${path} OK`);
+    if (!isPoll || logPoll) log.debug(`${method} ${path} OK`);
     return data.result;
   }
 
@@ -163,13 +186,13 @@ export const DEFAULT_DEVICE_ID = process.env.DEVICE_ID || null;
 export const DEFAULT_HOME_ID = process.env.HOME_ID || null;
 
 if (!ACCESS_ID || !ACCESS_SECRET) throw new Error("Missing ACCESS_ID or ACCESS_SECRET in .env");
-if (!DEFAULT_DEVICE_ID) console.warn("[tuya] No default DEVICE_ID in .env (per-user binding mode)");
-if (!DEFAULT_HOME_ID) console.warn("[tuya] No default HOME_ID in .env (per-user binding mode)");
+if (!DEFAULT_DEVICE_ID) log.warn("No default DEVICE_ID in .env (per-user binding mode)");
+if (!DEFAULT_HOME_ID) log.warn("No default HOME_ID in .env (per-user binding mode)");
 
 export const defaultClient = new TuyaClient({ accessId: ACCESS_ID, accessSecret: ACCESS_SECRET, region: REGION });
 
-console.log(`[tuya] region=${REGION} base=${REGION_ENDPOINTS[REGION]} device=${DEFAULT_DEVICE_ID || "none"} home=${DEFAULT_HOME_ID || "none"}`);
-console.log(`[tuya] ACCESS_ID=${ACCESS_ID.slice(0, 4)}***`);
+log.info(`region=${REGION} base=${REGION_ENDPOINTS[REGION]} device=${DEFAULT_DEVICE_ID || "none"} home=${DEFAULT_HOME_ID || "none"}`);
+log.info(`ACCESS_ID=${ACCESS_ID.slice(0, 4)}***`);
 
 // Re-export for backward compat during migration
 export const tuya = defaultClient;

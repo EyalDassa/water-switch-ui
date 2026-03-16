@@ -8,6 +8,9 @@
 
 import { isGuardEnabled, startGuard, refreshSchedules as refreshGuardSchedules } from "./activationGuard.js";
 import { createClerkClient } from "@clerk/express";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("sse");
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -71,18 +74,29 @@ async function pollDeviceStatus(deviceId) {
       online,
     };
 
+    const prev = group.cachedStatus;
     const changed =
-      newStatus.isOn !== group.cachedStatus.isOn ||
-      newStatus.countdownSeconds !== group.cachedStatus.countdownSeconds ||
-      newStatus.online !== group.cachedStatus.online;
+      newStatus.isOn !== prev.isOn ||
+      newStatus.countdownSeconds !== prev.countdownSeconds ||
+      newStatus.online !== prev.online;
 
     group.cachedStatus = newStatus;
 
     if (changed) {
+      const dev = deviceId.slice(0, 8);
+      if (newStatus.isOn !== prev.isOn) {
+        log.event(`Device ${dev}… turned ${newStatus.isOn ? "ON" : "OFF"} (detected by poll)`);
+      }
+      if (newStatus.countdownSeconds !== prev.countdownSeconds && (newStatus.countdownSeconds > 0 || prev.countdownSeconds > 0)) {
+        log.event(`Device ${dev}… countdown: ${prev.countdownSeconds}s → ${newStatus.countdownSeconds}s`);
+      }
+      if (newStatus.online !== prev.online) {
+        log.event(`Device ${dev}… went ${newStatus.online ? "online" : "offline"}`);
+      }
       broadcastToDevice(deviceId, "status", newStatus);
     }
   } catch (err) {
-    console.error(`[sse] pollStatus(${deviceId}):`, err.message);
+    log.error(`pollStatus(${deviceId.slice(0, 8)}…): ${err.message}`);
   }
 }
 
@@ -92,7 +106,7 @@ function startPollingDevice(deviceId) {
 
   pollDeviceStatus(deviceId);
   group.pollInterval = setInterval(() => pollDeviceStatus(deviceId), 8_000);
-  console.log(`[sse] Started polling device ${deviceId.slice(0, 8)}...`);
+  log.info(`Started polling device ${deviceId.slice(0, 8)}…`);
 }
 
 function stopPollingDevice(deviceId) {
@@ -102,7 +116,7 @@ function stopPollingDevice(deviceId) {
   if (group.pollInterval) {
     clearInterval(group.pollInterval);
     group.pollInterval = null;
-    console.log(`[sse] Stopped polling device ${deviceId.slice(0, 8)}...`);
+    log.info(`Stopped polling device ${deviceId.slice(0, 8)}…`);
   }
 
   if (group.clients.size === 0) {
@@ -176,12 +190,12 @@ async function initGuardIfEnabled(deviceId, deviceConfig) {
       startGuard(deviceId, adminUserId, "delayed");
     }
   } catch (err) {
-    console.warn("[sse] Failed to check guard setting:", err.message);
+    log.warn(`Failed to check guard setting: ${err.message}`);
   }
 }
 
 // ── Background poll (no-op in per-device mode) ──────────────────────────────
 
 export function startBackgroundPoll() {
-  console.log("[sse] Per-device polling mode active. Polling starts on SSE connect.");
+  log.info("Per-device polling mode active. Polling starts on SSE connect.");
 }

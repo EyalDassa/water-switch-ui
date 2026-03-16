@@ -12,6 +12,14 @@
  */
 
 import { createHash, createHmac, createCipheriv, createDecipheriv, randomUUID, randomBytes } from "crypto";
+import { createLogger, logPoll } from "./logger.js";
+
+const log = createLogger("sharing");
+
+const POLL_PATHS = ["/v1.0/m/life/"];
+function isPollPath(path) {
+  return POLL_PATHS.some((p) => path.startsWith(p)) && !path.includes("/logs") && !path.includes("/commands");
+}
 
 function randomNonce(size) {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -131,12 +139,13 @@ export class SharingClient {
     // Sign
     headers["X-sign"] = this.#computeSign(hashKey, headers, queryEncdata, bodyEncdata);
 
-    console.log(`[sharing] ${method} ${path}`);
+    const isPoll = isPollPath(path);
+    if (!isPoll || logPoll) log.debug(`${method} ${path}`);
     let res;
     try {
       res = await fetch(url, fetchOptions);
     } catch (err) {
-      console.error(`[sharing] FETCH ERROR ${method} ${path}: ${err.message}`);
+      log.error(`FETCH ERROR ${method} ${path}: ${err.message}`);
       throw new Error(`Sharing API fetch failed: ${err.message}`);
     }
 
@@ -145,11 +154,11 @@ export class SharingClient {
     if (!data.success) {
       // Token expired — try refresh once
       if (data.code === 1010 && _retry < 1) {
-        console.warn("[sharing] Token expired, refreshing...");
+        log.info("Token expired, refreshing...");
         await this.#refreshAccessToken();
         return this.#request(method, path, query, body, _retry + 1);
       }
-      console.error(`[sharing] API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
+      log.error(`API ERROR ${method} ${path}: [${data.code}] ${data.msg}`);
       throw new Error(`Sharing API error [${data.code}]: ${data.msg || JSON.stringify(data)}`);
     }
 
@@ -164,7 +173,7 @@ export class SharingClient {
       }
     }
 
-    console.log(`[sharing] ${method} ${path} OK`);
+    if (!isPoll || logPoll) log.debug(`${method} ${path} OK`);
     return result;
   }
 
@@ -173,7 +182,7 @@ export class SharingClient {
     this.#accessToken = result.access_token;
     this.#refreshToken = result.refresh_token;
     this.#onTokenRefresh?.(result.access_token, result.refresh_token);
-    console.log("[sharing] Token refreshed");
+    log.info("Token refreshed");
   }
 
   // ── Public API matching the paths used by tuya-device-sharing-sdk ──────────

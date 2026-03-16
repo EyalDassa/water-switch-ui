@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { notifyStatusChange, notifySchedulesChanged } from "../events.js";
 import { recordAction } from "../actionTracker.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("schedule");
 
 const router = Router();
 
@@ -104,7 +107,7 @@ router.get("/schedules", async (req, res) => {
     ]);
     res.json({ schedules });
   } catch (err) {
-    console.error("GET /schedules:", err.message);
+    log.error(`GET /schedules: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -149,10 +152,11 @@ router.post("/schedules", async (req, res) => {
       match_type: 1,
       preconditions: [],
     });
+    log.event(`Schedule created: "${displayName}" ${startTime}→${endTime} (${durationMin}m) ${days.join(",")}`);
     res.json({ success: true, id: automationId });
     notifySchedulesChanged(deviceId);
   } catch (err) {
-    console.error("POST /schedules:", err.message);
+    log.error(`POST /schedules: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -198,10 +202,11 @@ router.put("/schedules/:id", async (req, res) => {
       match_type: 1,
       preconditions: [],
     });
+    log.event(`Schedule updated: "${displayName}" ${startTime}→${endTime} (${durationMin}m) ${days.join(",")}`);
     res.json({ success: true });
     notifySchedulesChanged(deviceId);
   } catch (err) {
-    console.error("PUT /schedules:", err.message);
+    log.error(`PUT /schedules: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -215,10 +220,11 @@ router.delete("/schedules/:id", async (req, res) => {
   const autoId = req.params.id.replace(/:on$|:off$/, "");
   try {
     await req.tuya.delete(`/v1.0/homes/${homeId}/automations/${autoId}`);
+    log.event(`Schedule deleted: ${autoId}`);
     res.json({ success: true });
     notifySchedulesChanged(deviceId);
   } catch (err) {
-    console.error("DELETE /schedules:", err.message);
+    log.error(`DELETE /schedules: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -235,7 +241,7 @@ router.put("/schedules/:id/enable", async (req, res) => {
     res.json({ success: true });
     notifySchedulesChanged(deviceId);
   } catch (err) {
-    console.error("PUT /schedules enable:", err.message);
+    log.error(`PUT /schedules enable: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -252,7 +258,7 @@ router.put("/schedules/:id/disable", async (req, res) => {
     res.json({ success: true });
     notifySchedulesChanged(deviceId);
   } catch (err) {
-    console.error("PUT /schedules disable:", err.message);
+    log.error(`PUT /schedules disable: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -280,10 +286,11 @@ router.post("/countdown", async (req, res) => {
       });
     }
     recordAction(deviceId, "countdown", "on", req.deviceConfig.userId);
+    log.event(`Quick timer started: ${minutes}m (${seconds}s) by user ${req.deviceConfig.userId?.slice(0, 8) || "unknown"}…`);
     res.json({ success: true, countdownSeconds: seconds });
     notifyStatusChange(deviceId, req.tuya);
   } catch (err) {
-    console.error("POST /countdown:", err.message);
+    log.error(`POST /countdown: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });

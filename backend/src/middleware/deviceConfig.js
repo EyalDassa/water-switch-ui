@@ -2,6 +2,9 @@ import { getAuth } from "@clerk/express";
 import { createClerkClient } from "@clerk/express";
 import { defaultClient, DEFAULT_DEVICE_ID, DEFAULT_HOME_ID } from "../tuya.js";
 import { SharingClient, SHARING_CLIENT_ID } from "../sharing.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("auth");
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -77,7 +80,7 @@ export async function extractDeviceConfig(req, res, next) {
       req.tuya = defaultClient;
     }
   } catch (err) {
-    console.error(`[deviceConfig] Failed to load Tuya tokens for ${credentialsUserId}:`, err.message);
+    log.error(`Failed to load Tuya tokens for ${credentialsUserId}: ${err.message}`);
     req.tuya = defaultClient;
   }
 

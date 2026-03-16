@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { createClerkClient } from "@clerk/express";
 import { notifyStatusChange } from "../events.js";
-import { recordAction, findOurAction, findActionsInRange } from "../actionTracker.js";
+import {
+  recordAction,
+  findOurAction,
+  findActionsInRange,
+} from "../actionTracker.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("history");
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -18,7 +25,9 @@ router.get("/status", async (req, res) => {
         req.tuya.getDeviceStatus(deviceId),
         req.tuya.getDeviceInfo(deviceId).catch(() => null),
       ]);
-      dps = Array.isArray(statusResult) ? statusResult : statusResult?.status || statusResult?.dpStatusRelationDTOS || [];
+      dps = Array.isArray(statusResult)
+        ? statusResult
+        : statusResult?.status || statusResult?.dpStatusRelationDTOS || [];
       if (infoResult) online = infoResult.online ?? infoResult.isOnline ?? true;
     } else {
       const [statusResult, infoResult] = await Promise.all([
@@ -29,8 +38,12 @@ router.get("/status", async (req, res) => {
       if (infoResult) online = infoResult.online ?? true;
     }
 
-    const switchDp = dps.find((dp) => dp.code === "switch_1") ?? dps.find((dp) => dp.code === "switch");
-    const countdownDp = dps.find((dp) => dp.code === "countdown_1") ?? dps.find((dp) => dp.code === "countdown");
+    const switchDp =
+      dps.find((dp) => dp.code === "switch_1") ??
+      dps.find((dp) => dp.code === "switch");
+    const countdownDp =
+      dps.find((dp) => dp.code === "countdown_1") ??
+      dps.find((dp) => dp.code === "countdown");
 
     res.json({
       isOn: switchDp?.value ?? false,
@@ -39,7 +52,7 @@ router.get("/status", async (req, res) => {
       rawDps: dps,
     });
   } catch (err) {
-    console.error("GET /status:", err.message);
+    log.error(`GET /status: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -63,6 +76,9 @@ router.post("/toggle", async (req, res) => {
       });
     }
     recordAction(deviceId, "toggle", action, req.deviceConfig.userId);
+    log.event(
+      `Manual toggle ${action.toUpperCase()} by user ${req.deviceConfig.userId?.slice(0, 8) || "unknown"}…`,
+    );
     res.json({ success: true, isOn: value });
     notifyStatusChange(deviceId, req.tuya);
   } catch (firstErr) {
@@ -76,10 +92,13 @@ router.post("/toggle", async (req, res) => {
         });
       }
       recordAction(deviceId, "toggle", action, req.deviceConfig.userId);
+      log.event(
+        `Manual toggle ${action.toUpperCase()} by user ${req.deviceConfig.userId?.slice(0, 8) || "unknown"}… (fallback DP)`,
+      );
       res.json({ success: true, isOn: value });
       notifyStatusChange(deviceId, req.tuya);
     } catch (err) {
-      console.error("POST /toggle:", err.message);
+      log.error(`POST /toggle: ${err.message}`);
       res.status(502).json({ error: err.message });
     }
   }
@@ -93,18 +112,25 @@ async function fetchLogs(tuya, deviceId, startTime, endTime, code) {
   const MAX_PAGES = 5;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : "";
+    const rowKeyParam = lastRowKey
+      ? `&last_row_key=${encodeURIComponent(lastRowKey)}`
+      : "";
     const data = await tuya.get(
-      `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=${code}${rowKeyParam}`
+      `/v1.0/devices/${deviceId}/logs?start_time=${startTime}&end_time=${endTime}&size=100&type=7&codes=${code}${rowKeyParam}`,
     );
-    for (const log of (data.logs || [])) {
+    for (const log of data.logs || []) {
       const key = `${log.event_time}_${log.code}_${log.value}`;
       if (!seen.has(key)) {
         seen.add(key);
         logs.push(log);
       }
     }
-    if (!data.has_next || !data.next_row_key || data.next_row_key === lastRowKey) break;
+    if (
+      !data.has_next ||
+      !data.next_row_key ||
+      data.next_row_key === lastRowKey
+    )
+      break;
     lastRowKey = data.next_row_key;
   }
   return logs;
@@ -123,20 +149,44 @@ router.get("/history", async (req, res) => {
     if (req.tuya.isSharing) {
       try {
         const [switchData, countdownData] = await Promise.all([
-          req.tuya.getDeviceLogs(deviceId, { start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "switch_1" }),
-          req.tuya.getDeviceLogs(deviceId, { start_time: startTime, end_time: endTime, size: 100, type: 7, codes: "countdown_1" }),
+          req.tuya.getDeviceLogs(deviceId, {
+            start_time: startTime,
+            end_time: endTime,
+            size: 100,
+            type: 7,
+            codes: "switch_1",
+          }),
+          req.tuya.getDeviceLogs(deviceId, {
+            start_time: startTime,
+            end_time: endTime,
+            size: 100,
+            type: 7,
+            codes: "countdown_1",
+          }),
         ]);
-        const switchEvents = (switchData?.logs || []).sort((a, b) => a.event_time - b.event_time);
-        const countdownEvents = (countdownData?.logs || []).sort((a, b) => a.event_time - b.event_time);
-        console.log(`[history] sharing: ${switchEvents.length} switch, ${countdownEvents.length} countdown`);
+        const switchEvents = (switchData?.logs || []).sort(
+          (a, b) => a.event_time - b.event_time,
+        );
+        const countdownEvents = (countdownData?.logs || []).sort(
+          (a, b) => a.event_time - b.event_time,
+        );
+        log.debug(
+          `sharing: ${switchEvents.length} switch, ${countdownEvents.length} countdown`,
+        );
         const countdownSetEvents = findCountdownSetEvents(countdownEvents);
-        const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, []);
+        const allRuns = buildRuns(
+          switchEvents,
+          countdownSetEvents,
+          endTime,
+          deviceId,
+          [],
+        );
         const runs = allRuns.slice(-10);
         await resolveUserNames(runs);
         const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
         return res.json({ runs, totalSeconds });
       } catch (err) {
-        console.error("[history] sharing logs failed:", err.message);
+        log.error(`sharing logs failed: ${err.message}`);
         return res.json({ runs: [], totalSeconds: 0 });
       }
     }
@@ -150,33 +200,57 @@ router.get("/history", async (req, res) => {
     ]);
 
     const switchEvents = switchLogs.sort((a, b) => a.event_time - b.event_time);
-    const countdownEvents = countdownLogs.sort((a, b) => a.event_time - b.event_time);
+    const countdownEvents = countdownLogs.sort(
+      (a, b) => a.event_time - b.event_time,
+    );
 
-    console.log(`[history] ${switchEvents.length} switch, ${countdownEvents.length} countdown`);
+    log.debug(
+      `${switchEvents.length} switch events, ${countdownEvents.length} countdown events`,
+    );
 
     const countdownSetEvents = findCountdownSetEvents(countdownEvents);
 
-    // Debug: show raw countdown events and detected "set" events
-    console.log(`[history] countdown raw (last 20):`, countdownEvents.slice(-20).map(
-      (e) => `${new Date(e.event_time).toISOString().slice(11,19)} val=${e.value}`
-    ));
-    console.log(`[history] countdown SET events:`, countdownSetEvents.map(
-      (e) => `${new Date(e.event_time).toISOString().slice(11,19)} val=${e.value}`
-    ));
+    // Verbose debug: raw countdown events and detected "set" events
+    log.debug(
+      `countdown raw (last 20):`,
+      countdownEvents
+        .slice(-20)
+        .map(
+          (e) =>
+            `${new Date(e.event_time).toISOString().slice(11, 19)} val=${e.value}`,
+        ),
+    );
+    log.debug(
+      `countdown SET events:`,
+      countdownSetEvents.map(
+        (e) =>
+          `${new Date(e.event_time).toISOString().slice(11, 19)} val=${e.value}`,
+      ),
+    );
 
-    const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes);
+    const allRuns = buildRuns(
+      switchEvents,
+      countdownSetEvents,
+      endTime,
+      deviceId,
+      scheduleTimes,
+    );
     const runs = allRuns.slice(-10);
     await resolveUserNames(runs);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
-    // Debug: show final runs with sources
-    console.log(`[history] runs:`, runs.map(
-      (r) => `${r.date} ${r.startTime}-${r.endTime || "now"} ${r.source} ${r.userName || ""}`
-    ));
-    console.log(`[history] ${allRuns.length} total runs, returning ${runs.length}`);
+    // Summary: compact run list
+    log.info(
+      `${allRuns.length} runs (showing ${runs.length}): ${runs
+        .map(
+          (r) =>
+            `${r.startTime}-${r.endTime || "now"} ${r.source}${r.userName ? " · " + r.userName : ""}`,
+        )
+        .join(" | ")}`,
+    );
     res.json({ runs, totalSeconds });
   } catch (err) {
-    console.error("GET /history:", err.message);
+    log.error(`GET /history: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
 });
@@ -186,10 +260,14 @@ router.get("/history", async (req, res) => {
 async function getScheduleTimes(tuya, deviceConfig) {
   if (tuya.isSharing || !deviceConfig?.homeId) return [];
   try {
-    const automations = await tuya.get(`/v1.0/homes/${deviceConfig.homeId}/automations`);
+    const automations = await tuya.get(
+      `/v1.0/homes/${deviceConfig.homeId}/automations`,
+    );
     const times = [];
     for (const a of automations || []) {
-      const targetsDevice = a.actions?.some((act) => act.entity_id === deviceConfig.deviceId);
+      const targetsDevice = a.actions?.some(
+        (act) => act.entity_id === deviceConfig.deviceId,
+      );
       if (!targetsDevice) continue;
       const cond = a.conditions?.[0]?.display;
       if (cond?.time && a.enabled) {
@@ -198,7 +276,9 @@ async function getScheduleTimes(tuya, deviceConfig) {
     }
     return times;
   } catch (err) {
-    console.warn("[history] Failed to fetch automations for schedule matching:", err.message);
+    log.warn(
+      `Failed to fetch automations for schedule matching: ${err.message}`,
+    );
     return [];
   }
 }
@@ -231,7 +311,7 @@ function findCountdownSetEvents(countdownEvents) {
   const setEvents = [];
   for (let i = 0; i < countdownEvents.length; i++) {
     const val = parseInt(countdownEvents[i].value, 10) || 0;
-    const prevVal = i > 0 ? (parseInt(countdownEvents[i - 1].value, 10) || 0) : 0;
+    const prevVal = i > 0 ? parseInt(countdownEvents[i - 1].value, 10) || 0 : 0;
     // Value increased = a new countdown was just set
     if (val > prevVal) {
       setEvents.push(countdownEvents[i]);
@@ -252,7 +332,7 @@ function fmtHHMM(d) {
 // Note: Tuya type-7 logs report event_from="1" for ALL events on this device,
 // so we ignore event_from and rely on our action tracker + countdown detection.
 function classifyEvent(event, deviceId) {
-  const action = (event.value === "true" || event.value === true) ? "on" : "off";
+  const action = event.value === "true" || event.value === true ? "on" : "off";
   const ours = findOurAction(deviceId, event.event_time, action);
   if (ours) return { type: ours.type, userId: ours.userId };
   return { type: "external", userId: null };
@@ -271,16 +351,22 @@ function determineRunSource(onSource, hasCountdown, isScheduled) {
 
 // Batch-resolve userIds to display names, mutates runs in place
 async function resolveUserNames(runs) {
-  const userIds = [...new Set(runs.filter((r) => r.userId).map((r) => r.userId))];
+  const userIds = [
+    ...new Set(runs.filter((r) => r.userId).map((r) => r.userId)),
+  ];
   if (userIds.length === 0) {
     for (const r of runs) delete r.userId;
     return;
   }
   try {
-    const users = await clerk.users.getUserList({ userId: userIds, limit: 100 });
+    const users = await clerk.users.getUserList({
+      userId: userIds,
+      limit: 100,
+    });
     const nameMap = {};
     for (const u of users.data) {
-      nameMap[u.id] = u.firstName || u.emailAddresses?.[0]?.emailAddress || "User";
+      nameMap[u.id] =
+        u.firstName || u.emailAddresses?.[0]?.emailAddress || "User";
     }
     for (const run of runs) {
       if (run.userId && nameMap[run.userId]) {
@@ -289,7 +375,7 @@ async function resolveUserNames(runs) {
       delete run.userId;
     }
   } catch (err) {
-    console.warn("[history] Failed to resolve user names:", err.message);
+    log.warn(`Failed to resolve user names: ${err.message}`);
     for (const r of runs) delete r.userId;
   }
 }
@@ -298,22 +384,41 @@ async function resolveUserNames(runs) {
  * Find mid-run re-activations: someone started a new timer/toggle while device was already ON.
  * Merges signals from our action tracker (has userId) and countdown set events (persisted in Tuya logs).
  */
-function findMidRunReactivations(onTime, offTime, countdownSetEvents, deviceId) {
+function findMidRunReactivations(
+  onTime,
+  offTime,
+  countdownSetEvents,
+  deviceId,
+) {
   const reactivations = [];
   const MERGE_WINDOW = 10_000; // 10s — same event from different sources
 
   // From action tracker (has userId, type)
-  const trackerActions = findActionsInRange(deviceId, onTime + MERGE_WINDOW, offTime);
+  const trackerActions = findActionsInRange(
+    deviceId,
+    onTime + MERGE_WINDOW,
+    offTime,
+  );
   for (const a of trackerActions) {
-    reactivations.push({ timestamp: a.timestamp, type: a.type, userId: a.userId });
+    reactivations.push({
+      timestamp: a.timestamp,
+      type: a.type,
+      userId: a.userId,
+    });
   }
 
   // From countdown set events (persisted in Tuya logs, survives restarts)
   for (const ce of countdownSetEvents) {
     if (ce.event_time > onTime + MERGE_WINDOW && ce.event_time < offTime) {
-      const alreadyTracked = reactivations.some((r) => Math.abs(r.timestamp - ce.event_time) < MERGE_WINDOW);
+      const alreadyTracked = reactivations.some(
+        (r) => Math.abs(r.timestamp - ce.event_time) < MERGE_WINDOW,
+      );
       if (!alreadyTracked) {
-        reactivations.push({ timestamp: ce.event_time, type: "external", userId: null });
+        reactivations.push({
+          timestamp: ce.event_time,
+          type: "external",
+          userId: null,
+        });
       }
     }
   }
@@ -322,7 +427,15 @@ function findMidRunReactivations(onTime, offTime, countdownSetEvents, deviceId) 
   return reactivations;
 }
 
-function makeRun(startTime, endTime, endTimeIsNow, classification, hasCountdown, isScheduled, wasBlocked) {
+function makeRun(
+  startTime,
+  endTime,
+  endTimeIsNow,
+  classification,
+  hasCountdown,
+  isScheduled,
+  wasBlocked,
+) {
   const startDate = new Date(startTime);
   const durationSec = Math.round((endTime - startTime) / 1000);
   return {
@@ -330,12 +443,20 @@ function makeRun(startTime, endTime, endTimeIsNow, classification, hasCountdown,
     endTime: endTimeIsNow ? null : fmtHHMM(new Date(endTime)),
     date: fmtDate(startDate),
     durationSec,
-    source: wasBlocked ? "blocked" : determineRunSource(classification.type, hasCountdown, isScheduled),
+    source: wasBlocked
+      ? "blocked"
+      : determineRunSource(classification.type, hasCountdown, isScheduled),
     userId: classification.userId,
   };
 }
 
-function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes) {
+function buildRuns(
+  switchEvents,
+  countdownSetEvents,
+  endTime,
+  deviceId,
+  scheduleTimes,
+) {
   const allRuns = [];
   let onEvent = null;
 
@@ -345,15 +466,35 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
       if (onEvent) {
         const onClass = classifyEvent(onEvent, deviceId);
         const hasCd = countdownSetEvents.some(
-          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+          (ce) =>
+            ce.value !== "0" &&
+            ce.value !== 0 &&
+            Math.abs(ce.event_time - onEvent.event_time) < 5000,
         );
-        const isSched = onClass.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
-        allRuns.push(makeRun(onEvent.event_time, event.event_time, false, onClass, hasCd, isSched, false));
+        const isSched =
+          onClass.type === "external" &&
+          matchesSchedule(onEvent.event_time, scheduleTimes);
+        allRuns.push(
+          makeRun(
+            onEvent.event_time,
+            event.event_time,
+            false,
+            onClass,
+            hasCd,
+            isSched,
+            false,
+          ),
+        );
       }
       onEvent = event;
     } else if (onEvent) {
       // ON→OFF pair — check for mid-run re-activations to split
-      const reactivations = findMidRunReactivations(onEvent.event_time, event.event_time, countdownSetEvents, deviceId);
+      const reactivations = findMidRunReactivations(
+        onEvent.event_time,
+        event.event_time,
+        countdownSetEvents,
+        deviceId,
+      );
 
       if (reactivations.length > 0) {
         let segStart = onEvent.event_time;
@@ -361,10 +502,25 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
 
         for (const react of reactivations) {
           const hasCd = countdownSetEvents.some(
-            (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+            (ce) =>
+              ce.value !== "0" &&
+              ce.value !== 0 &&
+              Math.abs(ce.event_time - segStart) < 5000,
           );
-          const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
-          allRuns.push(makeRun(segStart, react.timestamp, false, segClass, hasCd, isSched, false));
+          const isSched =
+            segClass.type === "external" &&
+            matchesSchedule(segStart, scheduleTimes);
+          allRuns.push(
+            makeRun(
+              segStart,
+              react.timestamp,
+              false,
+              segClass,
+              hasCd,
+              isSched,
+              false,
+            ),
+          );
 
           segStart = react.timestamp;
           segClass = { type: react.type, userId: react.userId };
@@ -373,21 +529,51 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
         // Final segment: last reactivation → OFF
         const offClassification = classifyEvent(event, deviceId);
         const hasCd = countdownSetEvents.some(
-          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+          (ce) =>
+            ce.value !== "0" &&
+            ce.value !== 0 &&
+            Math.abs(ce.event_time - segStart) < 5000,
         );
-        const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
+        const isSched =
+          segClass.type === "external" &&
+          matchesSchedule(segStart, scheduleTimes);
         const wasBlocked = offClassification.type === "guard";
-        allRuns.push(makeRun(segStart, event.event_time, false, segClass, hasCd, isSched, wasBlocked));
+        allRuns.push(
+          makeRun(
+            segStart,
+            event.event_time,
+            false,
+            segClass,
+            hasCd,
+            isSched,
+            wasBlocked,
+          ),
+        );
       } else {
         // Normal single run
         const onClassification = classifyEvent(onEvent, deviceId);
         const offClassification = classifyEvent(event, deviceId);
         const hasCountdown = countdownSetEvents.some(
-          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+          (ce) =>
+            ce.value !== "0" &&
+            ce.value !== 0 &&
+            Math.abs(ce.event_time - onEvent.event_time) < 5000,
         );
-        const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
+        const isScheduled =
+          onClassification.type === "external" &&
+          matchesSchedule(onEvent.event_time, scheduleTimes);
         const wasBlocked = offClassification.type === "guard";
-        allRuns.push(makeRun(onEvent.event_time, event.event_time, false, onClassification, hasCountdown, isScheduled, wasBlocked));
+        allRuns.push(
+          makeRun(
+            onEvent.event_time,
+            event.event_time,
+            false,
+            onClassification,
+            hasCountdown,
+            isScheduled,
+            wasBlocked,
+          ),
+        );
       }
       onEvent = null;
     }
@@ -395,7 +581,12 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
 
   // Still-running (no OFF yet)
   if (onEvent) {
-    const reactivations = findMidRunReactivations(onEvent.event_time, endTime, countdownSetEvents, deviceId);
+    const reactivations = findMidRunReactivations(
+      onEvent.event_time,
+      endTime,
+      countdownSetEvents,
+      deviceId,
+    );
 
     if (reactivations.length > 0) {
       let segStart = onEvent.event_time;
@@ -403,10 +594,25 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
 
       for (const react of reactivations) {
         const hasCd = countdownSetEvents.some(
-          (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+          (ce) =>
+            ce.value !== "0" &&
+            ce.value !== 0 &&
+            Math.abs(ce.event_time - segStart) < 5000,
         );
-        const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
-        allRuns.push(makeRun(segStart, react.timestamp, false, segClass, hasCd, isSched, false));
+        const isSched =
+          segClass.type === "external" &&
+          matchesSchedule(segStart, scheduleTimes);
+        allRuns.push(
+          makeRun(
+            segStart,
+            react.timestamp,
+            false,
+            segClass,
+            hasCd,
+            isSched,
+            false,
+          ),
+        );
 
         segStart = react.timestamp;
         segClass = { type: react.type, userId: react.userId };
@@ -414,17 +620,39 @@ function buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, schedule
 
       // Final segment: still running
       const hasCd = countdownSetEvents.some(
-        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - segStart) < 5000
+        (ce) =>
+          ce.value !== "0" &&
+          ce.value !== 0 &&
+          Math.abs(ce.event_time - segStart) < 5000,
       );
-      const isSched = segClass.type === "external" && matchesSchedule(segStart, scheduleTimes);
-      allRuns.push(makeRun(segStart, endTime, true, segClass, hasCd, isSched, false));
+      const isSched =
+        segClass.type === "external" &&
+        matchesSchedule(segStart, scheduleTimes);
+      allRuns.push(
+        makeRun(segStart, endTime, true, segClass, hasCd, isSched, false),
+      );
     } else {
       const onClassification = classifyEvent(onEvent, deviceId);
       const hasCountdown = countdownSetEvents.some(
-        (ce) => ce.value !== "0" && ce.value !== 0 && Math.abs(ce.event_time - onEvent.event_time) < 5000
+        (ce) =>
+          ce.value !== "0" &&
+          ce.value !== 0 &&
+          Math.abs(ce.event_time - onEvent.event_time) < 5000,
       );
-      const isScheduled = onClassification.type === "external" && matchesSchedule(onEvent.event_time, scheduleTimes);
-      allRuns.push(makeRun(onEvent.event_time, endTime, true, onClassification, hasCountdown, isScheduled, false));
+      const isScheduled =
+        onClassification.type === "external" &&
+        matchesSchedule(onEvent.event_time, scheduleTimes);
+      allRuns.push(
+        makeRun(
+          onEvent.event_time,
+          endTime,
+          true,
+          onClassification,
+          hasCountdown,
+          isScheduled,
+          false,
+        ),
+      );
     }
   }
 

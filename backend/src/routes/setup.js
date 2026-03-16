@@ -3,6 +3,9 @@ import { getAuth } from "@clerk/express";
 import { createClerkClient } from "@clerk/express";
 import { defaultClient } from "../tuya.js";
 import { SharingClient, SHARING_CLIENT_ID } from "../sharing.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("setup");
 
 const router = Router();
 
@@ -16,7 +19,7 @@ const QR_SCHEMA = "haauthorize";
 async function qrFetch(url) {
   const res = await fetch(url, { method: "POST" });
   const data = await res.json();
-  console.log("[setup] QR API response:", JSON.stringify(data));
+  log.debug(" QR API response:", JSON.stringify(data));
   return data;
 }
 
@@ -39,14 +42,14 @@ router.post("/setup/qr-code", async (req, res) => {
     // The qrcode value is both the polling token and the QR content
     const qrcode = data.result.qrcode;
     const qrContent = `tuyaSmart--qrLogin?token=${qrcode}`;
-    console.log("[setup] QR content:", qrContent);
+    log.debug(" QR content:", qrContent);
 
     res.json({
       token: qrcode,
       qrCodeUrl: qrContent,
     });
   } catch (err) {
-    console.error("[setup] QR code error:", err.message);
+    log.error(" QR code error:", err.message);
     res.status(502).json({ error: err.message });
   }
 });
@@ -75,7 +78,7 @@ router.post("/setup/qr-poll", async (req, res) => {
 
     // The login result may include an endpoint (regional API base) for this user
     const userEndpoint = result.endpoint || null;
-    console.log("[setup] QR login success, uid:", result.uid, "endpoint:", userEndpoint);
+    log.debug(" QR login success, uid:", result.uid, "endpoint:", userEndpoint);
 
     // Save Tuya tokens to Clerk privateMetadata
     await clerk.users.updateUserMetadata(userId, {
@@ -100,7 +103,7 @@ router.post("/setup/qr-poll", async (req, res) => {
 
     res.json({ status: "success", devices });
   } catch (err) {
-    console.error("[setup] QR poll error:", err.message);
+    log.error(" QR poll error:", err.message);
     res.status(502).json({ error: err.message });
   }
 });
@@ -132,7 +135,7 @@ router.get("/setup/devices", async (req, res) => {
     const devices = await discoverDevices(sharingClient);
     res.json({ devices });
   } catch (err) {
-    console.error("[setup] List devices error:", err.message);
+    log.error(" List devices error:", err.message);
     res.status(502).json({ error: err.message });
   }
 });
@@ -153,7 +156,7 @@ router.post("/setup/select-device", async (req, res) => {
     });
     res.json({ success: true });
   } catch (err) {
-    console.error("[setup] Select device error:", err.message);
+    log.error(" Select device error:", err.message);
     res.status(500).json({ error: "Failed to save device configuration" });
   }
 });
@@ -178,7 +181,7 @@ async function discoverDevices(sharingClient) {
 
   try {
     const homes = await sharingClient.getHomes();
-    console.log("[setup] Found homes:", JSON.stringify(homes));
+    log.debug(" Found homes:", JSON.stringify(homes));
 
     for (const home of homes || []) {
       const homeId = home.homeId || home.home_id || home.ownerId;
@@ -196,11 +199,11 @@ async function discoverDevices(sharingClient) {
           });
         }
       } catch (err) {
-        console.warn(`[setup] Failed to list devices for home ${homeId}:`, err.message);
+        log.warn(` Failed to list devices for home ${homeId}:`, err.message);
       }
     }
   } catch (err) {
-    console.error("[setup] Failed to discover devices:", err.message);
+    log.error(" Failed to discover devices:", err.message);
   }
 
   return devices;
