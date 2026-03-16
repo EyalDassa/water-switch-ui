@@ -1,3 +1,10 @@
+// ── Timestamp all console output ─────────────────────────────────────────────
+const _log = console.log, _warn = console.warn, _err = console.error;
+const ts = () => new Date().toISOString().replace("T", " ").slice(0, 23);
+console.log  = (...a) => _log(`[${ts()}]`, ...a);
+console.warn = (...a) => _warn(`[${ts()}]`, ...a);
+console.error = (...a) => _err(`[${ts()}]`, ...a);
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";

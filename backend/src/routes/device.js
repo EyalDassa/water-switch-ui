@@ -155,11 +155,24 @@ router.get("/history", async (req, res) => {
     console.log(`[history] ${switchEvents.length} switch, ${countdownEvents.length} countdown`);
 
     const countdownSetEvents = findCountdownSetEvents(countdownEvents);
+
+    // Debug: show raw countdown events and detected "set" events
+    console.log(`[history] countdown raw (last 20):`, countdownEvents.slice(-20).map(
+      (e) => `${new Date(e.event_time).toISOString().slice(11,19)} val=${e.value}`
+    ));
+    console.log(`[history] countdown SET events:`, countdownSetEvents.map(
+      (e) => `${new Date(e.event_time).toISOString().slice(11,19)} val=${e.value}`
+    ));
+
     const allRuns = buildRuns(switchEvents, countdownSetEvents, endTime, deviceId, scheduleTimes);
     const runs = allRuns.slice(-10);
     await resolveUserNames(runs);
     const totalSeconds = runs.reduce((sum, r) => sum + r.durationSec, 0);
 
+    // Debug: show final runs with sources
+    console.log(`[history] runs:`, runs.map(
+      (r) => `${r.date} ${r.startTime}-${r.endTime || "now"} ${r.source} ${r.userName || ""}`
+    ));
     console.log(`[history] ${allRuns.length} total runs, returning ${runs.length}`);
     res.json({ runs, totalSeconds });
   } catch (err) {
