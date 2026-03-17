@@ -314,6 +314,10 @@ function findCountdownSetEvents(countdownEvents) {
     const prevVal = i > 0 ? parseInt(countdownEvents[i - 1].value, 10) || 0 : 0;
     // Value increased = a new countdown was just set
     if (val > prevVal) {
+      const prevTime = i > 0 ? new Date(countdownEvents[i - 1].event_time).toISOString().slice(11, 19) : "n/a";
+      const curTime = new Date(countdownEvents[i].event_time).toISOString().slice(11, 19);
+      const gapMs = i > 0 ? countdownEvents[i].event_time - countdownEvents[i - 1].event_time : 0;
+      log.debug(`SET detected: ${curTime} val=${val} (prev: ${prevTime} val=${prevVal}, gap=${Math.round(gapMs / 1000)}s, entry ${i}/${countdownEvents.length})`);
       setEvents.push(countdownEvents[i]);
     }
   }
