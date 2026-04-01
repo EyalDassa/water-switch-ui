@@ -79,7 +79,6 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryRun[]>([]);
-  const [historyTotal, setHistoryTotal] = useState(0);
   const [editorState, setEditorState] = useState<{ show: boolean; initial?: ScheduleEditData }>({ show: false });
   const [showInvite, setShowInvite] = useState(false);
 
@@ -111,7 +110,6 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
       if (!res.ok) return;
       const data = await res.json();
       setHistory(data.runs || []);
-      setHistoryTotal(data.totalSeconds || 0);
     } catch {
       // History is non-critical — silently ignore errors
     }
@@ -134,7 +132,8 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
     if (status.isOn !== prevIsOnRef.current) {
       prevIsOnRef.current = status.isOn;
       // Delay slightly so Tuya has time to log the event
-      setTimeout(fetchHistory, 3000);
+      const timer = setTimeout(fetchHistory, 3000);
+      return () => clearTimeout(timer);
     }
   }, [status.isOn, status.loading, fetchHistory]);
 
@@ -175,7 +174,7 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
               onEditSchedule={openEditor}
             />
             <StatusCard status={status} schedules={schedules} />
-            <HistoryCard runs={history} totalSeconds={historyTotal} />
+            <HistoryCard runs={history} />
           </div>
 
           {/* Right column on desktop: controls */}

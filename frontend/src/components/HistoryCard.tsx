@@ -12,7 +12,6 @@ const SOURCE_LABELS: Record<string, { text: string; color: string }> = {
 
 interface Props {
   runs: HistoryRun[];
-  totalSeconds: number;
 }
 
 function formatDuration(sec: number): string {

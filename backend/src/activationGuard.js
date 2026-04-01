@@ -153,7 +153,7 @@ export function handlePulsarStatus(deviceId, dps) {
       guard.lastKnownOn = false;
       guard.onSince = null;
       sendNotification(deviceId, guard);
-    });
+    }).catch((err) => log.error(`Failed to block activation: ${err.message}`));
     return;
   }
 
@@ -171,15 +171,18 @@ function scheduleDelayedBlock(deviceId, guard) {
 
   guard.delayedTimeout = setTimeout(async () => {
     guard.delayedTimeout = null;
-    // Verify device is still on before blocking
     if (!guard.lastKnownOn) return;
 
-    log.event(`BLOCKING activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
-    await turnOff(deviceId);
-    recordAction(deviceId, "guard", "off");
-    guard.lastKnownOn = false;
-    guard.onSince = null;
-    sendNotification(deviceId, guard);
+    try {
+      log.event(`BLOCKING activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
+      await turnOff(deviceId);
+      recordAction(deviceId, "guard", "off");
+      guard.lastKnownOn = false;
+      guard.onSince = null;
+      sendNotification(deviceId, guard);
+    } catch (err) {
+      log.error(`Failed to block delayed activation: ${err.message}`);
+    }
   }, DELAYED_BLOCK_MS);
 }
 

@@ -95,6 +95,7 @@ export function ScheduleEditor({ initial, onSave, onCancel }: Props) {
       onSave();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error saving schedule");
+    } finally {
       setLoading(false);
     }
   }

@@ -157,7 +157,7 @@ export function sseHandler(req, res) {
 
   // Send cached status immediately, then fetch fresh status from Tuya
   res.write(`event: status\ndata: ${JSON.stringify(group.cachedStatus)}\n\n`);
-  fetchAndBroadcastStatus(deviceId);
+  fetchAndBroadcastStatus(deviceId).catch((err) => log.error(`Initial fetch failed: ${err.message}`));
 
   group.clients.add(res);
 

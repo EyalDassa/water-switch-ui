@@ -17,7 +17,7 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("pulsar");
 
-const REGION_ENDPOINTS = {
+const PULSAR_ENDPOINTS = {
   us: "wss://mqe.tuyaus.com:8285/",
   eu: "wss://mqe.tuyaeu.com:8285/",
   cn: "wss://mqe.tuyacn.com:8285/",
@@ -40,9 +40,9 @@ function decryptByECB(base64Data, accessSecret) {
 
 function decryptByGCM(base64Data, accessSecret) {
   const buf = Buffer.from(base64Data, "base64");
-  const iv = buf.slice(0, 12);
-  const tag = buf.slice(-16);
-  const cdata = buf.slice(12, buf.length - 16);
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(-16);
+  const cdata = buf.subarray(12, buf.length - 16);
   const decipher = createDecipheriv("aes-128-gcm", accessSecret.substring(8, 24), iv);
   decipher.setAuthTag(tag);
   let dataStr = decipher.update(cdata, undefined, "utf8");
@@ -74,7 +74,7 @@ function buildPassword(accessId, accessSecret) {
  * @returns {{ close: () => void }}
  */
 export function connectPulsar({ accessId, accessSecret, region, onStatus }) {
-  const baseUrl = REGION_ENDPOINTS[region];
+  const baseUrl = PULSAR_ENDPOINTS[region];
   if (!baseUrl) throw new Error(`Invalid Pulsar region "${region}"`);
 
   const env = "event"; // production topic (SDK uses "event" for PROD)
@@ -130,7 +130,7 @@ export function connectPulsar({ accessId, accessSecret, region, onStatus }) {
       log.error(`WebSocket error: ${err.message}`);
     });
 
-    ws.on("close", (code, reason) => {
+    ws.on("close", (code) => {
       clearHeartbeat();
       if (closed) return;
       log.warn(`WebSocket closed (${code}), reconnecting in ${backoff / 1000}s…`);
@@ -169,8 +169,8 @@ export function connectPulsar({ accessId, accessSecret, region, onStatus }) {
       const pStr = Buffer.from(payload, "base64").toString("utf-8");
       const pJson = JSON.parse(pStr);
 
-      const encryptyModel = properties?.em;
-      const data = encryptyModel === "aes_gcm"
+      const encryptionMode = properties?.em;
+      const data = encryptionMode === "aes_gcm"
         ? decryptByGCM(pJson.data, accessSecret)
         : decryptByECB(pJson.data, accessSecret);
 
