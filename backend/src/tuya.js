@@ -15,6 +15,9 @@ import { createLogger, logPoll } from "./logger.js";
 
 const log = createLogger("tuya");
 
+// SHA-256 of empty string — used when request has no body
+const EMPTY_BODY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
 // Paths that fire every poll cycle — only log when LOG_POLL=true
 const POLL_PATHS = ["/v1.0/iot-03/devices/", "/v1.0/devices/"];
 function isPollPath(path) {
@@ -115,7 +118,7 @@ export class TuyaClient {
 
     const bodyHash = body
       ? createHash("sha256").update(JSON.stringify(body)).digest("hex")
-      : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+      : EMPTY_BODY_SHA256;
 
     let signUrl = path;
     const qIdx = path.indexOf("?");
@@ -195,8 +198,3 @@ export const defaultClient = new TuyaClient({ accessId: ACCESS_ID, accessSecret:
 
 log.info(`region=${REGION} base=${REGION_ENDPOINTS[REGION]} device=${DEFAULT_DEVICE_ID || "none"} home=${DEFAULT_HOME_ID || "none"}`);
 log.info(`ACCESS_ID=${ACCESS_ID.slice(0, 4)}***`);
-
-// Re-export for backward compat during migration
-export const tuya = defaultClient;
-export const DEVICE_ID = DEFAULT_DEVICE_ID;
-export const HOME_ID = DEFAULT_HOME_ID;

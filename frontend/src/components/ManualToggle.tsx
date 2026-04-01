@@ -3,7 +3,7 @@ import styles from "./ManualToggle.module.css";
 
 interface Props {
   isOn: boolean;
-  onToggle: (newState: boolean) => void;
+  onToggle?: (newState: boolean) => void;
 }
 
 export function ManualToggle({ isOn, onToggle }: Props) {
@@ -26,7 +26,7 @@ export function ManualToggle({ isOn, onToggle }: Props) {
       if (!res.ok) throw new Error(data.error || "Failed to toggle");
 
       // Optimistic update handled by parent via refetch
-      onToggle(newState);
+      onToggle?.(newState);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {

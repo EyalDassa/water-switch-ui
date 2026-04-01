@@ -297,23 +297,24 @@ router.get(
         log.error(" Reconciliation check failed:", err.message);
       }
 
-      // Enrich team list with display names
-      const enriched = [];
-      for (const member of team) {
-        try {
-          const u = await clerk.users.getUser(member.userId);
-          enriched.push({
+      // Enrich team list with display names (batch fetch)
+      let enriched = team.map((m) => ({ ...m, name: m.email, canInvite: m.canInvite || false }));
+      try {
+        const userIds = team.map((m) => m.userId);
+        const users = await clerk.users.getUserList({ userId: userIds, limit: 100 });
+        const userMap = new Map(users.data.map((u) => [u.id, u]));
+        enriched = team.map((member) => {
+          const u = userMap.get(member.userId);
+          return {
             userId: member.userId,
-            email: member.email || u.emailAddresses?.[0]?.emailAddress || "",
-            name:
-              [u.firstName, u.lastName].filter(Boolean).join(" ") ||
-              member.email,
+            email: member.email || u?.emailAddresses?.[0]?.emailAddress || "",
+            name: u ? [u.firstName, u.lastName].filter(Boolean).join(" ") || member.email : member.email,
             canInvite: member.canInvite || false,
-            imageUrl: u.imageUrl,
-          });
-        } catch {
-          enriched.push({ ...member, name: member.email });
-        }
+            imageUrl: u?.imageUrl,
+          };
+        });
+      } catch {
+        // Fallback: use email as name
       }
 
       // Read pending invite count from admin's privateMetadata
@@ -351,20 +352,23 @@ router.get(
         imageUrl: adminUser.imageUrl,
       });
 
-      // Add other members
-      for (const member of teamList) {
-        try {
-          const u = await clerk.users.getUser(member.userId);
+      // Add other members (batch fetch)
+      try {
+        const memberIds = teamList.map((m) => m.userId);
+        const users = await clerk.users.getUserList({ userId: memberIds, limit: 100 });
+        const userMap = new Map(users.data.map((u) => [u.id, u]));
+        for (const member of teamList) {
+          const u = userMap.get(member.userId);
           enriched.push({
             userId: member.userId,
-            email: u.emailAddresses?.[0]?.emailAddress || member.email,
-            name:
-              [u.firstName, u.lastName].filter(Boolean).join(" ") ||
-              member.email,
+            email: u?.emailAddresses?.[0]?.emailAddress || member.email,
+            name: u ? [u.firstName, u.lastName].filter(Boolean).join(" ") || member.email : member.email,
             role: "member",
-            imageUrl: u.imageUrl,
+            imageUrl: u?.imageUrl,
           });
-        } catch {
+        }
+      } catch {
+        for (const member of teamList) {
           enriched.push({ ...member, name: member.email, role: "member" });
         }
       }
@@ -453,21 +457,23 @@ router.get(
     }
 
     const team = pub.team || [];
-    const members = [];
-    for (const member of team) {
-      try {
-        const u = await clerk.users.getUser(member.userId);
-        members.push({
+    let members = team.map((m) => ({ ...m, name: m.email }));
+    try {
+      const userIds = team.map((m) => m.userId);
+      const users = await clerk.users.getUserList({ userId: userIds, limit: 100 });
+      const userMap = new Map(users.data.map((u) => [u.id, u]));
+      members = team.map((member) => {
+        const u = userMap.get(member.userId);
+        return {
           userId: member.userId,
-          email: u.emailAddresses?.[0]?.emailAddress || member.email,
-          name:
-            [u.firstName, u.lastName].filter(Boolean).join(" ") || member.email,
+          email: u?.emailAddresses?.[0]?.emailAddress || member.email,
+          name: u ? [u.firstName, u.lastName].filter(Boolean).join(" ") || member.email : member.email,
           canInvite: member.canInvite || false,
-          imageUrl: u.imageUrl,
-        });
-      } catch {
-        members.push({ ...member, name: member.email });
-      }
+          imageUrl: u?.imageUrl,
+        };
+      });
+    } catch {
+      // Fallback: use email as name
     }
 
     res.json({ members });

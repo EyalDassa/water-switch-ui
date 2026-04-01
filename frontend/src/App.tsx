@@ -179,10 +179,9 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
 
           {/* Right column on desktop: controls */}
           <div className={styles.rightCol}>
-            <ManualToggle isOn={status.isOn} onToggle={() => {}} />
+            <ManualToggle isOn={status.isOn} />
             <CountdownCard
               countdownSeconds={status.countdownSeconds}
-              onStarted={() => {}}
             />
             <ScheduleList
               schedules={schedules}

@@ -3,7 +3,7 @@ import styles from "./CountdownCard.module.css";
 
 interface Props {
   countdownSeconds: number;
-  onStarted: () => void;
+  onStarted?: () => void;
 }
 
 const PRESETS = [15, 30, 45, 60];
@@ -24,7 +24,7 @@ export function CountdownCard({ countdownSeconds, onStarted }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to start countdown");
-      onStarted();
+      onStarted?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
     } finally {
