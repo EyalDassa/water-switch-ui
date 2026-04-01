@@ -87,7 +87,8 @@ export class TuyaClient {
       const result = await this.#signedRequest("GET", `/v1.0/token/${this.#refreshToken}`, null, true);
       this.#cachedToken = result.access_token;
       this.#refreshToken = result.refresh_token;
-      this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
+      const buffer = result.expire_time > 120 ? 60 : 0;
+      this.#tokenExpiry = Date.now() + (result.expire_time - buffer) * 1000;
       this.#onTokenRefresh?.(result.access_token, result.refresh_token);
       log.info(`User token refreshed, expires in ${result.expire_time}s`);
       return this.#cachedToken;
@@ -97,7 +98,8 @@ export class TuyaClient {
     log.info("Fetching new access token...");
     const result = await this.#signedRequest("GET", "/v1.0/token?grant_type=1", null, true);
     this.#cachedToken = result.access_token;
-    this.#tokenExpiry = Date.now() + (result.expire_time - 60) * 1000;
+    const buffer = result.expire_time > 120 ? 60 : 0;
+    this.#tokenExpiry = Date.now() + (result.expire_time - buffer) * 1000;
     log.info(`Token obtained, expires in ${result.expire_time}s`);
     return this.#cachedToken;
   }

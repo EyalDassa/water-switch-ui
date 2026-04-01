@@ -1,9 +1,10 @@
 /**
  * SSE (Server-Sent Events) manager with per-device client groups.
  *
- * - Maintains a Map of deviceId → { clients, cachedStatus, pollInterval }
- * - Only polls devices that have active SSE connections
- * - Stops polling when all clients for a device disconnect
+ * - Maintains a Map of deviceId → { clients, cachedStatus }
+ * - Status updates come from Tuya Pulsar push (no polling)
+ * - handlePulsarStatus() is called by server.js when a push arrives
+ * - Initial status fetched once on SSE connect
  */
 
 import { isGuardEnabled, startGuard, refreshSchedules as refreshGuardSchedules } from "./activationGuard.js";
@@ -15,7 +16,7 @@ const log = createLogger("sse");
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 // ── Per-device client registry ──────────────────────────────────────────────
-// Map<deviceId, { clients: Set<res>, tuyaClient: TuyaClient, cachedStatus, pollInterval }>
+// Map<deviceId, { clients: Set<res>, tuyaClient: TuyaClient, cachedStatus }>
 const deviceGroups = new Map();
 
 function getOrCreateGroup(deviceId, tuyaClient) {
@@ -24,11 +25,9 @@ function getOrCreateGroup(deviceId, tuyaClient) {
       clients: new Set(),
       tuyaClient,
       cachedStatus: { isOn: false, countdownSeconds: 0, online: true },
-      pollInterval: null,
     });
   }
   const group = deviceGroups.get(deviceId);
-  // Update tuyaClient if a newer one is provided
   if (tuyaClient) group.tuyaClient = tuyaClient;
   return group;
 }
@@ -42,9 +41,55 @@ function broadcastToDevice(deviceId, event, data) {
   }
 }
 
-async function pollDeviceStatus(deviceId) {
+// ── Pulsar push handler (called from server.js) ─────────────────────────────
+
+/**
+ * Handle a device status push from Tuya Pulsar.
+ * @param {string} deviceId
+ * @param {Array<{code: string, value: any}>} dps - data points from push
+ */
+export function handlePulsarStatus(deviceId, dps) {
   const group = deviceGroups.get(deviceId);
-  if (!group || group.clients.size === 0) return;
+  if (!group) return;
+
+  const switchDp = dps.find((dp) => dp.code === "switch_1") ?? dps.find((dp) => dp.code === "switch");
+  const countdownDp = dps.find((dp) => dp.code === "countdown_1") ?? dps.find((dp) => dp.code === "countdown");
+
+  // Pulsar pushes only changed DPs, so merge with cached
+  const prev = group.cachedStatus;
+  const newStatus = {
+    isOn: switchDp ? switchDp.value : prev.isOn,
+    countdownSeconds: countdownDp ? countdownDp.value : prev.countdownSeconds,
+    online: true, // receiving a push means device is online
+  };
+
+  const changed =
+    newStatus.isOn !== prev.isOn ||
+    newStatus.countdownSeconds !== prev.countdownSeconds ||
+    newStatus.online !== prev.online;
+
+  group.cachedStatus = newStatus;
+
+  if (changed) {
+    const dev = deviceId.slice(0, 8);
+    if (newStatus.isOn !== prev.isOn) {
+      log.event(`Device ${dev}… turned ${newStatus.isOn ? "ON" : "OFF"} (push)`);
+    }
+    if (newStatus.countdownSeconds !== prev.countdownSeconds && (newStatus.countdownSeconds > 0 || prev.countdownSeconds > 0)) {
+      log.event(`Device ${dev}… countdown: ${prev.countdownSeconds}s → ${newStatus.countdownSeconds}s`);
+    }
+    if (newStatus.online !== prev.online) {
+      log.event(`Device ${dev}… went online (push)`);
+    }
+    broadcastToDevice(deviceId, "status", newStatus);
+  }
+}
+
+// ── One-time status fetch (on SSE connect) ──────────────────────────────────
+
+async function fetchAndBroadcastStatus(deviceId) {
+  const group = deviceGroups.get(deviceId);
+  if (!group) return;
 
   try {
     let dps;
@@ -74,69 +119,23 @@ async function pollDeviceStatus(deviceId) {
       online,
     };
 
-    const prev = group.cachedStatus;
-    const changed =
-      newStatus.isOn !== prev.isOn ||
-      newStatus.countdownSeconds !== prev.countdownSeconds ||
-      newStatus.online !== prev.online;
-
     group.cachedStatus = newStatus;
-
-    if (changed) {
-      const dev = deviceId.slice(0, 8);
-      if (newStatus.isOn !== prev.isOn) {
-        log.event(`Device ${dev}… turned ${newStatus.isOn ? "ON" : "OFF"} (detected by poll)`);
-      }
-      if (newStatus.countdownSeconds !== prev.countdownSeconds && (newStatus.countdownSeconds > 0 || prev.countdownSeconds > 0)) {
-        log.event(`Device ${dev}… countdown: ${prev.countdownSeconds}s → ${newStatus.countdownSeconds}s`);
-      }
-      if (newStatus.online !== prev.online) {
-        log.event(`Device ${dev}… went ${newStatus.online ? "online" : "offline"}`);
-      }
-      broadcastToDevice(deviceId, "status", newStatus);
-    }
+    broadcastToDevice(deviceId, "status", newStatus);
   } catch (err) {
-    log.error(`pollStatus(${deviceId.slice(0, 8)}…): ${err.message}`);
-  }
-}
-
-function startPollingDevice(deviceId) {
-  const group = deviceGroups.get(deviceId);
-  if (!group || group.pollInterval) return;
-
-  pollDeviceStatus(deviceId);
-  group.pollInterval = setInterval(() => pollDeviceStatus(deviceId), 8_000);
-  log.info(`Started polling device ${deviceId.slice(0, 8)}…`);
-}
-
-function stopPollingDevice(deviceId) {
-  const group = deviceGroups.get(deviceId);
-  if (!group) return;
-
-  if (group.pollInterval) {
-    clearInterval(group.pollInterval);
-    group.pollInterval = null;
-    log.info(`Stopped polling device ${deviceId.slice(0, 8)}…`);
-  }
-
-  if (group.clients.size === 0) {
-    deviceGroups.delete(deviceId);
+    log.error(`fetchStatus(${deviceId.slice(0, 8)}…): ${err.message}`);
   }
 }
 
 // ── Public helpers for mutation routes ───────────────────────────────────────
 
-/** Call after toggle/countdown — waits briefly for Tuya to process, then polls + broadcasts */
+/** Call after toggle/countdown — Pulsar push will broadcast to SSE clients */
 export async function notifyStatusChange(deviceId, tuyaClient) {
   if (tuyaClient) getOrCreateGroup(deviceId, tuyaClient);
-  await new Promise((r) => setTimeout(r, 1000));
-  await pollDeviceStatus(deviceId);
 }
 
 /** Call after schedule CRUD — tells connected frontends for this device to re-fetch */
 export function notifySchedulesChanged(deviceId) {
   broadcastToDevice(deviceId, "schedules-changed", {});
-  // Keep guard schedule cache in sync
   refreshGuardSchedules(deviceId);
 }
 
@@ -156,11 +155,11 @@ export function sseHandler(req, res) {
 
   const group = getOrCreateGroup(deviceId, req.tuya);
 
-  // Send cached status immediately
+  // Send cached status immediately, then fetch fresh status from Tuya
   res.write(`event: status\ndata: ${JSON.stringify(group.cachedStatus)}\n\n`);
+  fetchAndBroadcastStatus(deviceId);
 
   group.clients.add(res);
-  startPollingDevice(deviceId);
 
   // Initialize activation guard if the admin has it enabled
   if (!isGuardEnabled(deviceId)) {
@@ -170,7 +169,7 @@ export function sseHandler(req, res) {
   req.on("close", () => {
     group.clients.delete(res);
     if (group.clients.size === 0) {
-      stopPollingDevice(deviceId);
+      deviceGroups.delete(deviceId);
     }
   });
 }
@@ -194,8 +193,8 @@ async function initGuardIfEnabled(deviceId, deviceConfig) {
   }
 }
 
-// ── Background poll (no-op in per-device mode) ──────────────────────────────
+// ── No-op (polling removed — Pulsar provides updates) ────────────────────────
 
 export function startBackgroundPoll() {
-  log.info("Per-device polling mode active. Polling starts on SSE connect.");
+  log.info("Pulsar push mode active — no polling needed.");
 }

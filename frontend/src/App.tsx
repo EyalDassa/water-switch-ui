@@ -127,6 +127,7 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
   }, [fetchSchedules, fetchHistory]);
 
   // Re-fetch history when isOn transitions (device turned on or off)
+  // and periodically while ON so the "now" run duration ticks up
   const prevIsOnRef = useRef(status.isOn);
   useEffect(() => {
     if (status.loading) return;
@@ -135,6 +136,12 @@ function Dashboard({ role, canInvite }: { role: "admin" | "member"; canInvite: b
       // Delay slightly so Tuya has time to log the event
       setTimeout(fetchHistory, 3000);
     }
+  }, [status.isOn, status.loading, fetchHistory]);
+
+  useEffect(() => {
+    if (!status.isOn || status.loading) return;
+    const interval = setInterval(fetchHistory, 30_000);
+    return () => clearInterval(interval);
   }, [status.isOn, status.loading, fetchHistory]);
 
   function openEditor(initial?: ScheduleEditData) {

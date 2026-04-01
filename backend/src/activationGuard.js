@@ -1,9 +1,10 @@
 /**
- * Activation Guard — blocks external (non-app, non-scheduled) device activations.
+ * Activation Guard — enforces max run time on ALL device activations.
  *
- * When enabled, polls the device every 10s. If the device turns ON and neither
- * our API nor a schedule triggered it, it immediately sends an OFF command
- * and optionally emails the household.
+ * Push-based: triggered by Tuya Pulsar status pushes (no polling).
+ * - Immediate mode: blocks external (non-app, non-scheduled) activations instantly
+ * - Delayed mode: allows any activation but enforces a max run time (1h30s)
+ *   using setTimeout — precise to the millisecond, zero API calls while waiting.
  */
 
 import { defaultClient as tuya } from "./tuya.js";
@@ -16,8 +17,7 @@ const log = createLogger("guard");
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 // ── In-memory state ────────────────────────────────────────────────────────
-// deviceId → { mode, adminUserId, scheduleTimes, pollInterval, lastKnownOn, onSince }
-// mode: "immediate" = block all external, "delayed" = block after 1h30s
+// deviceId → { mode, adminUserId, scheduleTimes, lastKnownOn, onSince, delayedTimeout }
 const guardedDevices = new Map();
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -37,7 +37,6 @@ export function isGuardEnabled(deviceId) {
 export function startGuard(deviceId, adminUserId, mode = "immediate") {
   const existing = guardedDevices.get(deviceId);
   if (existing) {
-    // Update mode without restarting polling
     existing.mode = mode;
     return;
   }
@@ -47,13 +46,11 @@ export function startGuard(deviceId, adminUserId, mode = "immediate") {
     adminUserId,
     scheduleTimes: [],
     lastKnownOn: false,
-    onSince: null, // timestamp when external ON was first detected
-    pollInterval: setInterval(() => guardPoll(deviceId), 10_000),
+    onSince: null,
+    delayedTimeout: null,
   };
   guardedDevices.set(deviceId, guard);
 
-  // Seed current state + schedules
-  guardPoll(deviceId);
   refreshSchedules(deviceId);
   log.info(`Started for device ${deviceId.slice(0, 8)}… (mode: ${mode})`);
 }
@@ -61,7 +58,7 @@ export function startGuard(deviceId, adminUserId, mode = "immediate") {
 export function stopGuard(deviceId) {
   const guard = guardedDevices.get(deviceId);
   if (!guard) return;
-  clearInterval(guard.pollInterval);
+  if (guard.delayedTimeout) clearTimeout(guard.delayedTimeout);
   guardedDevices.delete(deviceId);
   log.info(`Stopped for device ${deviceId.slice(0, 8)}…`);
 }
@@ -91,74 +88,102 @@ export async function refreshSchedules(deviceId) {
   }
 }
 
-// ── Internal ───────────────────────────────────────────────────────────────
+// ── Pulsar push handler (called from server.js) ─────────────────────────────
 
 const DELAYED_BLOCK_MS = (60 * 60 + 30) * 1000; // 1 hour 30 seconds
 
-async function guardPoll(deviceId) {
+/**
+ * Handle a device status push from Tuya Pulsar.
+ * @param {string} deviceId
+ * @param {Array<{code: string, value: any}>} dps
+ */
+export function handlePulsarStatus(deviceId, dps) {
   const guard = guardedDevices.get(deviceId);
   if (!guard) return;
 
-  try {
-    const dps = await tuya.get(`/v1.0/iot-03/devices/${deviceId}/status`);
-    const switchDp =
-      dps.find((dp) => dp.code === "switch_1") ??
-      dps.find((dp) => dp.code === "switch");
-    const isOn = switchDp?.value ?? false;
+  const switchDp =
+    dps.find((dp) => dp.code === "switch_1") ??
+    dps.find((dp) => dp.code === "switch");
 
-    const wasOff = !guard.lastKnownOn;
-    guard.lastKnownOn = isOn;
+  // Only react to switch state changes
+  if (!switchDp) return;
 
-    if (!isOn) {
-      guard.onSince = null;
-      return;
+  const isOn = switchDp.value;
+  const wasOff = !guard.lastKnownOn;
+  guard.lastKnownOn = isOn;
+
+  // ── Device turned OFF → clear any pending timeout ──────────────────
+  if (!isOn) {
+    if (guard.delayedTimeout) {
+      clearTimeout(guard.delayedTimeout);
+      guard.delayedTimeout = null;
     }
+    guard.onSince = null;
+    return;
+  }
 
-    // Was it triggered by our API?
-    if (wasRecentlyToggledByUs(deviceId, "on")) {
-      guard.onSince = null;
-      return;
+  // ── Device turned ON (transition from OFF → ON) ────────────────────
+  if (!wasOff) return; // already ON, ignore repeated pushes
+
+  // Was it triggered by our API?
+  if (wasRecentlyToggledByUs(deviceId, "on")) {
+    guard.onSince = null;
+    // In delayed mode, still enforce max run time even for our own activations
+    if (guard.mode === "delayed") {
+      scheduleDelayedBlock(deviceId, guard);
     }
+    return;
+  }
 
-    // Does it match a schedule?
-    if (wasOff && matchesSchedule(Date.now(), guard.scheduleTimes)) {
-      guard.onSince = null;
-      return;
+  // Does it match a schedule?
+  if (matchesSchedule(Date.now(), guard.scheduleTimes)) {
+    guard.onSince = null;
+    // In delayed mode, still enforce max run time even for scheduled activations
+    if (guard.mode === "delayed") {
+      scheduleDelayedBlock(deviceId, guard);
     }
+    return;
+  }
 
-    // ── Immediate mode: block on first detection ───────────────────────
-    if (guard.mode === "immediate" && wasOff) {
-      log.event(`BLOCKING external activation on ${deviceId.slice(0, 8)}… (immediate mode)`);
-      await turnOff(deviceId);
+  // ── Immediate mode: block on first detection ───────────────────────
+  if (guard.mode === "immediate") {
+    log.event(`BLOCKING external activation on ${deviceId.slice(0, 8)}… (immediate mode)`);
+    turnOff(deviceId).then(() => {
       recordAction(deviceId, "guard", "off");
       guard.lastKnownOn = false;
       guard.onSince = null;
       sendNotification(deviceId, guard);
-      return;
-    }
+    });
+    return;
+  }
 
-    // ── Delayed mode: block after 1h30s of uninterrupted external run ──
-    if (guard.mode === "delayed") {
-      if (wasOff) {
-        // New external ON — start tracking
-        guard.onSince = Date.now();
-        log.event(`External activation detected on ${deviceId.slice(0, 8)}…, will block after 1h`);
-        return;
-      }
-
-      if (guard.onSince && Date.now() - guard.onSince >= DELAYED_BLOCK_MS) {
-        log.event(`BLOCKING external activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
-        await turnOff(deviceId);
-        recordAction(deviceId, "guard", "off");
-        guard.lastKnownOn = false;
-        guard.onSince = null;
-        sendNotification(deviceId, guard);
-      }
-    }
-  } catch (err) {
-    log.error(`Poll error: ${err.message}`);
+  // ── Delayed mode: allow but enforce max run time ───────────────────
+  if (guard.mode === "delayed") {
+    log.event(`External activation detected on ${deviceId.slice(0, 8)}…, will block after 1h`);
+    guard.onSince = Date.now();
+    scheduleDelayedBlock(deviceId, guard);
   }
 }
+
+function scheduleDelayedBlock(deviceId, guard) {
+  // Clear any existing timeout
+  if (guard.delayedTimeout) clearTimeout(guard.delayedTimeout);
+
+  guard.delayedTimeout = setTimeout(async () => {
+    guard.delayedTimeout = null;
+    // Verify device is still on before blocking
+    if (!guard.lastKnownOn) return;
+
+    log.event(`BLOCKING activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
+    await turnOff(deviceId);
+    recordAction(deviceId, "guard", "off");
+    guard.lastKnownOn = false;
+    guard.onSince = null;
+    sendNotification(deviceId, guard);
+  }, DELAYED_BLOCK_MS);
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
 
 function matchesSchedule(timestamp, scheduleTimes) {
   if (!scheduleTimes || scheduleTimes.length === 0) return false;

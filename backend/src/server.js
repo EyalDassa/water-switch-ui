@@ -14,7 +14,9 @@ import setupRoutes from "./routes/setup.js";
 import teamRoutes from "./routes/team.js";
 import deviceRoutes from "./routes/device.js";
 import scheduleRoutes from "./routes/schedule.js";
-import { sseHandler, startBackgroundPoll } from "./events.js";
+import { sseHandler, startBackgroundPoll, handlePulsarStatus as ssePulsarHandler } from "./events.js";
+import { handlePulsarStatus as guardPulsarHandler } from "./activationGuard.js";
+import { connectPulsar } from "./pulsar.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -75,4 +77,21 @@ app.listen(PORT, "0.0.0.0", () => {
   log.info(`Water Switch UI backend running on http://0.0.0.0:${PORT}`);
   log.info(`API available at http://0.0.0.0:${PORT}/api`);
   startBackgroundPoll();
+
+  // Connect to Tuya Pulsar for real-time device status pushes
+  const ACCESS_ID = process.env.ACCESS_ID;
+  const ACCESS_SECRET = process.env.ACCESS_SECRET;
+  const TUYA_REGION = process.env.TUYA_REGION || "eu";
+
+  if (ACCESS_ID && ACCESS_SECRET) {
+    connectPulsar({
+      accessId: ACCESS_ID,
+      accessSecret: ACCESS_SECRET,
+      region: TUYA_REGION,
+      onStatus(deviceId, status) {
+        ssePulsarHandler(deviceId, status);
+        guardPulsarHandler(deviceId, status);
+      },
+    });
+  }
 });
