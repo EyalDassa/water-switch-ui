@@ -21,7 +21,7 @@ const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 const guardedDevices = new Map();
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@parligator.com";
+const EMAIL_FROM = process.env.EMAIL_FROM;
 if (RESEND_API_KEY) {
   log.info("Resend configured — email notifications enabled");
 } else {
@@ -34,16 +34,29 @@ export function isGuardEnabled(deviceId) {
   return guardedDevices.has(deviceId);
 }
 
-export function startGuard(deviceId, adminUserId, mode = "immediate") {
+/**
+ * @param {string} deviceId
+ * @param {string} adminUserId
+ * @param {"immediate"|"delayed"} mode
+ * @param {number} [delayMs] - max run time in ms for delayed mode (default: 1h30s)
+ */
+export function startGuard(
+  deviceId,
+  adminUserId,
+  mode = "immediate",
+  delayMs = DEFAULT_DELAY_MS,
+) {
   const existing = guardedDevices.get(deviceId);
   if (existing) {
     existing.mode = mode;
+    existing.delayMs = delayMs;
     return;
   }
 
   const guard = {
     mode,
     adminUserId,
+    delayMs,
     scheduleTimes: [],
     lastKnownOn: false,
     onSince: null,
@@ -52,7 +65,11 @@ export function startGuard(deviceId, adminUserId, mode = "immediate") {
   guardedDevices.set(deviceId, guard);
 
   refreshSchedules(deviceId);
-  log.info(`Started for device ${deviceId.slice(0, 8)}… (mode: ${mode})`);
+  const delayLabel =
+    mode === "delayed" ? `, max ${Math.round(delayMs / 60000)}m` : "";
+  log.info(
+    `Started for device ${deviceId.slice(0, 8)}… (mode: ${mode}${delayLabel})`,
+  );
 }
 
 export function stopGuard(deviceId) {
@@ -75,7 +92,9 @@ export async function refreshSchedules(deviceId) {
     const automations = await tuya.get(`/v1.0/homes/${homeId}/automations`);
     const times = [];
     for (const a of automations || []) {
-      const targetsDevice = a.actions?.some((act) => act.entity_id === deviceId);
+      const targetsDevice = a.actions?.some(
+        (act) => act.entity_id === deviceId,
+      );
       if (!targetsDevice) continue;
       const cond = a.conditions?.[0]?.display;
       if (cond?.time && a.enabled) {
@@ -90,7 +109,7 @@ export async function refreshSchedules(deviceId) {
 
 // ── Pulsar push handler (called from server.js) ─────────────────────────────
 
-const DELAYED_BLOCK_MS = (60 * 60 + 30) * 1000; // 1 hour 30 seconds
+const DEFAULT_DELAY_MS = (60 * 60 + 30) * 1000; // 1 hour 30 seconds
 
 /**
  * Handle a device status push from Tuya Pulsar.
@@ -147,19 +166,25 @@ export function handlePulsarStatus(deviceId, dps) {
 
   // ── Immediate mode: block on first detection ───────────────────────
   if (guard.mode === "immediate") {
-    log.event(`BLOCKING external activation on ${deviceId.slice(0, 8)}… (immediate mode)`);
-    turnOff(deviceId).then(() => {
-      recordAction(deviceId, "guard", "off");
-      guard.lastKnownOn = false;
-      guard.onSince = null;
-      sendNotification(deviceId, guard);
-    }).catch((err) => log.error(`Failed to block activation: ${err.message}`));
+    log.event(
+      `BLOCKING external activation on ${deviceId.slice(0, 8)}… (immediate mode)`,
+    );
+    turnOff(deviceId)
+      .then(() => {
+        recordAction(deviceId, "guard", "off");
+        guard.lastKnownOn = false;
+        guard.onSince = null;
+        sendNotification(deviceId, guard);
+      })
+      .catch((err) => log.error(`Failed to block activation: ${err.message}`));
     return;
   }
 
   // ── Delayed mode: allow but enforce max run time ───────────────────
   if (guard.mode === "delayed") {
-    log.event(`External activation detected on ${deviceId.slice(0, 8)}…, will block after 1h`);
+    log.event(
+      `External activation detected on ${deviceId.slice(0, 8)}…, will block after 1h`,
+    );
     guard.onSince = Date.now();
     scheduleDelayedBlock(deviceId, guard);
   }
@@ -174,7 +199,9 @@ function scheduleDelayedBlock(deviceId, guard) {
     if (!guard.lastKnownOn) return;
 
     try {
-      log.event(`BLOCKING activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`);
+      log.event(
+        `BLOCKING activation (exceeded 1h) on ${deviceId.slice(0, 8)}…`,
+      );
       await turnOff(deviceId);
       recordAction(deviceId, "guard", "off");
       guard.lastKnownOn = false;
@@ -183,7 +210,7 @@ function scheduleDelayedBlock(deviceId, guard) {
     } catch (err) {
       log.error(`Failed to block delayed activation: ${err.message}`);
     }
-  }, DELAYED_BLOCK_MS);
+  }, guard.delayMs);
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -230,7 +257,9 @@ async function sendNotification(deviceId, guard) {
       timeZone: "Asia/Jerusalem",
     });
 
-    log.event(`Blocked external activation on "${deviceName}" at ${time}. Notifying: ${adminEmail || "(no email)"}`);
+    log.event(
+      `Blocked external activation on "${deviceName}" at ${time}. Notifying: ${adminEmail || "(no email)"}`,
+    );
 
     if (!RESEND_API_KEY || !adminEmail) return;
 

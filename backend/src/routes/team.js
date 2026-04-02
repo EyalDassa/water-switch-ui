@@ -622,6 +622,7 @@ router.get(
     res.json({
       blockExternalActivations: !!settings.blockExternalActivations,
       blockAfterOneHour: !!settings.blockAfterOneHour,
+      guardMaxMinutes: settings.guardMaxMinutes || 60,
       isAdmin: isAdmin(pub),
     });
   }),
@@ -638,12 +639,13 @@ router.put(
       return res.status(403).json({ error: "Admin access required" });
     }
 
-    const { blockExternalActivations, blockAfterOneHour } = req.body;
+    const { blockExternalActivations, blockAfterOneHour, guardMaxMinutes } = req.body;
 
     // At least one setting must be provided
     if (
       typeof blockExternalActivations !== "boolean" &&
-      typeof blockAfterOneHour !== "boolean"
+      typeof blockAfterOneHour !== "boolean" &&
+      typeof guardMaxMinutes !== "number"
     ) {
       return res.status(400).json({ error: "No valid settings provided" });
     }
@@ -663,6 +665,9 @@ router.put(
       // If enabling delayed, disable immediate block
       if (blockAfterOneHour) settings.blockExternalActivations = false;
     }
+    if (typeof guardMaxMinutes === "number" && guardMaxMinutes >= 1 && guardMaxMinutes <= 1440) {
+      settings.guardMaxMinutes = guardMaxMinutes;
+    }
 
     await clerk.users.updateUserMetadata(userId, {
       publicMetadata: { ...adminPub, settings },
@@ -670,21 +675,23 @@ router.put(
 
     // Start or stop the activation guard
     const deviceId = pub.deviceId || process.env.DEVICE_ID;
+    const delayMs = ((settings.guardMaxMinutes || 60) * 60 + 30) * 1000; // +30s buffer
     if (settings.blockExternalActivations) {
       startGuard(deviceId, userId, "immediate");
     } else if (settings.blockAfterOneHour) {
-      startGuard(deviceId, userId, "delayed");
+      startGuard(deviceId, userId, "delayed", delayMs);
     } else {
       stopGuard(deviceId);
     }
 
     log.info(
-      `[settings] blockExternalActivations=${settings.blockExternalActivations}, blockAfterOneHour=${settings.blockAfterOneHour} for device ${deviceId?.slice(0, 8)}...`,
+      `[settings] blockExternalActivations=${settings.blockExternalActivations}, blockAfterOneHour=${settings.blockAfterOneHour}, guardMaxMinutes=${settings.guardMaxMinutes || 60} for device ${deviceId?.slice(0, 8)}...`,
     );
     res.json({
       success: true,
       blockExternalActivations: settings.blockExternalActivations,
       blockAfterOneHour: settings.blockAfterOneHour,
+      guardMaxMinutes: settings.guardMaxMinutes || 60,
     });
   }),
 );

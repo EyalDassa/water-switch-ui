@@ -4,8 +4,17 @@ import styles from "./SettingsPanel.module.css";
 interface Settings {
   blockExternalActivations: boolean;
   blockAfterOneHour: boolean;
+  guardMaxMinutes: number;
   isAdmin: boolean;
 }
+
+const DURATION_OPTIONS = [
+  { value: 15, label: "15 min" },
+  { value: 30, label: "30 min" },
+  { value: 60, label: "1 hour" },
+  { value: 90, label: "1.5 hours" },
+  { value: 120, label: "2 hours" },
+];
 
 export function SettingsPanel() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -46,6 +55,7 @@ export function SettingsPanel() {
         ...settings,
         blockExternalActivations: data.blockExternalActivations,
         blockAfterOneHour: data.blockAfterOneHour,
+        guardMaxMinutes: data.guardMaxMinutes,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
@@ -97,12 +107,11 @@ export function SettingsPanel() {
           <div className={styles.settingRow}>
             <div className={styles.settingInfo}>
               <span className={styles.settingName}>
-                Block external activations after 1 hour
+                Auto-off after max run time
               </span>
               <span className={styles.settingDesc}>
-                Allow external activations (quick timers, SmartLife) but
-                automatically turn off after 1 hour to prevent unattended long
-                runs.
+                Automatically turn off the device after the selected duration to
+                prevent unattended long runs.
               </span>
             </div>
             <button
@@ -128,6 +137,24 @@ export function SettingsPanel() {
               <span className={styles.toggleKnob} />
             </button>
           </div>
+
+          {settings.blockAfterOneHour && (
+            <div className={styles.durationRow}>
+              <span className={styles.durationLabel}>Max run time:</span>
+              <div className={styles.durationOptions}>
+                {DURATION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`${styles.durationBtn} ${settings.guardMaxMinutes === opt.value ? styles.durationBtnActive : ""}`}
+                    onClick={() => updateSetting({ guardMaxMinutes: opt.value })}
+                    disabled={saving || !settings.isAdmin}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && <p className={styles.error}>{error}</p>}
         </div>

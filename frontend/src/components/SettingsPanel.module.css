@@ -114,6 +114,54 @@
   transform: translateX(20px);
 }
 
+/* Duration selector */
+.durationRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 4px;
+}
+
+.durationLabel {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.durationOptions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.durationBtn {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.durationBtn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.durationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.durationBtnActive {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
 .error {
   font-size: 13px;
   color: var(--danger);

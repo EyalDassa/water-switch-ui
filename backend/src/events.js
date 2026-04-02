@@ -186,7 +186,8 @@ async function initGuardIfEnabled(deviceId, deviceConfig) {
     if (settings?.blockExternalActivations) {
       startGuard(deviceId, adminUserId, "immediate");
     } else if (settings?.blockAfterOneHour) {
-      startGuard(deviceId, adminUserId, "delayed");
+      const delayMs = ((settings.guardMaxMinutes || 60) * 60 + 30) * 1000;
+      startGuard(deviceId, adminUserId, "delayed", delayMs);
     }
   } catch (err) {
     log.warn(`Failed to check guard setting: ${err.message}`);

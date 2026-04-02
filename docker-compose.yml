@@ -2,7 +2,7 @@ services:
   frontend:
     image: ghcr.io/eyaldassa/water-switch-ui-frontend:0.1.15
     expose:
-      - '80'
+      - "80"
     depends_on:
       - backend
     networks:
@@ -11,7 +11,7 @@ services:
   backend:
     image: ghcr.io/eyaldassa/water-switch-ui-backend:0.1.15
     expose:
-      - '3001'
+      - "3001"
     networks:
       - default
       - nginx-reverse-proxy_default
